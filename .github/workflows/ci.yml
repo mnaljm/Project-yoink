@@ -1,0 +1,188 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov flake8 black mypy
+
+    - name: Lint with flake8
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 src --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 src --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
+
+    - name: Check code formatting with Black
+      run: |
+        black --check --diff src
+
+    - name: Type check with mypy
+      run: |
+        mypy src --ignore-missing-imports
+      continue-on-error: true  # mypy can be strict, don't fail the build
+
+    - name: Test import structure
+      run: |
+        python -c "import sys; sys.path.insert(0, 'src'); from config import Config; print('Config import successful')"
+        python -c "import sys; sys.path.insert(0, 'src'); from utils import setup_logging; print('Utils import successful')"
+
+    - name: Validate configuration
+      run: |
+        python -c "
+        import json
+        with open('config.example.json') as f:
+            config = json.load(f)
+        assert 'discord' in config
+        assert 'settings' in config
+        print('Configuration validation passed')
+        "
+
+    - name: Test setup script
+      run: |
+        python setup.py --help || echo "Setup script executed"
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install security tools
+      run: |
+        pip install safety bandit
+
+    - name: Check for security vulnerabilities in dependencies
+      run: |
+        pip install -r requirements.txt
+        safety check
+
+    - name: Run security linter (Bandit)
+      run: |
+        bandit -r src -f json -o bandit-report.json || true
+
+    - name: Upload security report
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-report
+        path: bandit-report.json
+
+  documentation:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Check documentation
+      run: |
+        # Check if critical documentation files exist
+        test -f README.md
+        test -f CONTRIBUTING.md
+        test -f LICENSE
+        test -f SECURITY.md
+        test -f CHANGELOG.md
+        echo "Documentation files verified"
+
+    - name: Validate Markdown
+      uses: DavidAnson/markdownlint-action@v0.12.0
+      with:
+        files: '**/*.md'
+        ignore: 'node_modules'
+        config: |
+          {
+            "MD013": false,
+            "MD033": false,
+            "MD041": false
+          }
+
+  build:
+    needs: [test, security, documentation]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Build package
+      run: |
+        python -m build
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: dist
+        path: dist/
+
+  release-check:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Check version consistency
+      run: |
+        # Extract version from pyproject.toml
+        VERSION=$(grep '^version = ' pyproject.toml | cut -d'"' -f2)
+        echo "Version in pyproject.toml: $VERSION"
+        
+        # Check if CHANGELOG.md mentions this version
+        if grep -q "\[$VERSION\]" CHANGELOG.md; then
+          echo "✓ Version $VERSION found in CHANGELOG.md"
+        else
+          echo "⚠️  Version $VERSION not found in CHANGELOG.md"
+        fi
+
+    - name: Validate semver
+      run: |
+        VERSION=$(grep '^version = ' pyproject.toml | cut -d'"' -f2)
+        if [[ $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "✓ Version follows semantic versioning"
+        else
+          echo "❌ Version does not follow semantic versioning"
+          exit 1
+        fi

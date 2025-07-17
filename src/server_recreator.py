@@ -1,0 +1,422 @@
+"""
+Server recreator for Discord Yoink
+Recreates Discord servers from backup data
+"""
+
+import asyncio
+import logging
+from typing import Dict, Any, List, Optional
+from pathlib import Path
+import discord
+from discord.ext import commands
+
+from .config import Config
+from .media_downloader import MediaDownloader
+
+logger = logging.getLogger(__name__)
+
+
+class ServerRecreator:
+    def __init__(self, config: Config):
+        self.config = config
+        self.media_downloader = MediaDownloader(config)
+        self.role_mapping: Dict[str, str] = {}  # old_id -> new_id
+        self.channel_mapping: Dict[str, str] = {}  # old_id -> new_id
+        self.stats = {
+            'channels_created': 0,
+            'roles_created': 0,
+            'messages_restored': 0,
+            'errors': []
+        }
+    
+    async def recreate_server(
+        self, 
+        backup_data: Dict[str, Any], 
+        target_guild: discord.Guild,
+        skip_media: bool = False
+    ) -> Dict[str, Any]:
+        """Recreate a server from backup data"""
+        logger.info(f"Starting server recreation for: {target_guild.name}")
+        
+        try:
+            # Step 1: Create roles
+            await self._recreate_roles(backup_data.get('roles', {}), target_guild)
+            
+            # Step 2: Create channels and categories
+            await self._recreate_channels(backup_data.get('channels', {}), target_guild)
+            
+            # Step 3: Set server settings
+            await self._apply_server_settings(backup_data.get('server_info', {}), target_guild)
+            
+            # Step 4: Upload emojis
+            if not skip_media:
+                await self._recreate_emojis(backup_data.get('emojis', {}), target_guild)
+                await self._recreate_stickers(backup_data.get('stickers', {}), target_guild)
+            
+            # Step 5: Restore messages (optional, can be very slow)
+            # await self._restore_messages(backup_data.get('channels', {}), target_guild)
+            
+            logger.info("Server recreation completed successfully")
+            return self.stats
+            
+        except Exception as e:
+            logger.error(f"Server recreation failed: {e}")
+            self.stats['errors'].append(str(e))
+            raise
+    
+    async def preview_recreation(
+        self, 
+        backup_data: Dict[str, Any], 
+        target_guild: discord.Guild
+    ) -> Dict[str, Any]:
+        """Preview what would be created during recreation"""
+        preview = {
+            'server_info': backup_data.get('server_info', {}),
+            'roles_to_create': [],
+            'channels_to_create': [],
+            'emojis_to_upload': [],
+            'stickers_to_upload': [],
+            'warnings': []
+        }
+        
+        # Analyze roles
+        existing_roles = {role.name: role for role in target_guild.roles}
+        for role_id, role_data in backup_data.get('roles', {}).items():
+            role_name = role_data.get('name', 'Unknown')
+            if role_name in existing_roles:
+                preview['warnings'].append(f"Role '{role_name}' already exists")
+            else:
+                preview['roles_to_create'].append(role_name)
+        
+        # Analyze channels
+        existing_channels = {channel.name: channel for channel in target_guild.channels}
+        for channel_id, channel_data in backup_data.get('channels', {}).items():
+            channel_name = channel_data.get('name', 'Unknown')
+            if channel_name in existing_channels:
+                preview['warnings'].append(f"Channel '{channel_name}' already exists")
+            else:
+                preview['channels_to_create'].append(channel_name)
+        
+        # Analyze emojis
+        existing_emojis = {emoji.name: emoji for emoji in target_guild.emojis}
+        for emoji_id, emoji_data in backup_data.get('emojis', {}).items():
+            emoji_name = emoji_data.get('name', 'Unknown')
+            if emoji_name in existing_emojis:
+                preview['warnings'].append(f"Emoji '{emoji_name}' already exists")
+            else:
+                preview['emojis_to_upload'].append(emoji_name)
+        
+        return preview
+    
+    async def _recreate_roles(self, roles_data: Dict[str, Any], guild: discord.Guild) -> None:
+        """Recreate server roles"""
+        logger.info("Recreating roles...")
+        
+        # Sort roles by position (lowest first, excluding @everyone)
+        sorted_roles = sorted(
+            roles_data.items(),
+            key=lambda x: x[1].get('position', 0)
+        )
+        
+        for old_role_id, role_data in sorted_roles:
+            try:
+                # Skip if role already exists
+                existing_role = discord.utils.get(guild.roles, name=role_data['name'])
+                if existing_role:
+                    self.role_mapping[old_role_id] = str(existing_role.id)
+                    logger.debug(f"Role '{role_data['name']}' already exists")
+                    continue
+                
+                # Create role permissions
+                permissions = discord.Permissions(role_data.get('permissions', 0))
+                
+                # Create role
+                new_role = await guild.create_role(
+                    name=role_data['name'],
+                    permissions=permissions,
+                    color=discord.Color(role_data.get('color', 0)),
+                    hoist=role_data.get('hoist', False),
+                    mentionable=role_data.get('mentionable', False),
+                    reason="Server recreation from backup"
+                )
+                
+                self.role_mapping[old_role_id] = str(new_role.id)
+                self.stats['roles_created'] += 1
+                
+                logger.debug(f"Created role: {role_data['name']}")
+                
+                # Rate limiting
+                await asyncio.sleep(1)
+                
+            except discord.Forbidden:
+                logger.error(f"No permission to create role: {role_data['name']}")
+                self.stats['errors'].append(f"No permission to create role: {role_data['name']}")
+            except discord.HTTPException as e:
+                logger.error(f"Failed to create role {role_data['name']}: {e}")
+                self.stats['errors'].append(f"Failed to create role {role_data['name']}: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error creating role {role_data['name']}: {e}")
+                self.stats['errors'].append(f"Unexpected error creating role {role_data['name']}: {e}")
+    
+    async def _recreate_channels(self, channels_data: Dict[str, Any], guild: discord.Guild) -> None:
+        """Recreate server channels and categories"""
+        logger.info("Recreating channels...")
+        
+        # Separate categories and regular channels
+        categories = {}
+        regular_channels = {}
+        
+        for channel_id, channel_data in channels_data.items():
+            if channel_data.get('type') == 'category':
+                categories[channel_id] = channel_data
+            else:
+                regular_channels[channel_id] = channel_data
+        
+        # Create categories first
+        for old_category_id, category_data in categories.items():
+            try:
+                # Skip if category already exists
+                existing_category = discord.utils.get(guild.categories, name=category_data['name'])
+                if existing_category:
+                    self.channel_mapping[old_category_id] = str(existing_category.id)
+                    continue
+                
+                new_category = await guild.create_category(
+                    name=category_data['name'],
+                    position=category_data.get('position', 0),
+                    reason="Server recreation from backup"
+                )
+                
+                self.channel_mapping[old_category_id] = str(new_category.id)
+                self.stats['channels_created'] += 1
+                
+                logger.debug(f"Created category: {category_data['name']}")
+                await asyncio.sleep(1)
+                
+            except Exception as e:
+                logger.error(f"Failed to create category {category_data['name']}: {e}")
+                self.stats['errors'].append(f"Failed to create category {category_data['name']}: {e}")
+        
+        # Create regular channels
+        for old_channel_id, channel_data in regular_channels.items():
+            try:
+                # Skip if channel already exists
+                existing_channel = discord.utils.get(guild.channels, name=channel_data['name'])
+                if existing_channel:
+                    self.channel_mapping[old_channel_id] = str(existing_channel.id)
+                    continue
+                
+                # Get category if specified
+                category = None
+                if channel_data.get('category_id') and channel_data['category_id'] in self.channel_mapping:
+                    new_category_id = self.channel_mapping[channel_data['category_id']]
+                    category = guild.get_channel(int(new_category_id))
+                
+                # Create channel based on type
+                channel_type = channel_data.get('type', 'text')
+                
+                if channel_type == 'text':
+                    new_channel = await guild.create_text_channel(
+                        name=channel_data['name'],
+                        topic=channel_data.get('topic'),
+                        slowmode_delay=channel_data.get('slowmode_delay', 0),
+                        nsfw=channel_data.get('nsfw', False),
+                        category=category,
+                        position=channel_data.get('position', 0),
+                        reason="Server recreation from backup"
+                    )
+                
+                elif channel_type == 'voice':
+                    new_channel = await guild.create_voice_channel(
+                        name=channel_data['name'],
+                        bitrate=min(channel_data.get('bitrate', 64000), guild.bitrate_limit),
+                        user_limit=channel_data.get('user_limit', 0),
+                        category=category,
+                        position=channel_data.get('position', 0),
+                        reason="Server recreation from backup"
+                    )
+                
+                elif channel_type == 'forum':
+                    # Forum channels require special handling
+                    new_channel = await guild.create_forum_channel(
+                        name=channel_data['name'],
+                        topic=channel_data.get('topic'),
+                        category=category,
+                        position=channel_data.get('position', 0),
+                        reason="Server recreation from backup"
+                    )
+                
+                else:
+                    logger.warning(f"Unsupported channel type: {channel_type}")
+                    continue
+                
+                self.channel_mapping[old_channel_id] = str(new_channel.id)
+                self.stats['channels_created'] += 1
+                
+                logger.debug(f"Created {channel_type} channel: {channel_data['name']}")
+                await asyncio.sleep(1)
+                
+            except Exception as e:
+                logger.error(f"Failed to create channel {channel_data['name']}: {e}")
+                self.stats['errors'].append(f"Failed to create channel {channel_data['name']}: {e}")
+    
+    async def _apply_server_settings(self, server_info: Dict[str, Any], guild: discord.Guild) -> None:
+        """Apply server settings from backup"""
+        logger.info("Applying server settings...")
+        
+        try:
+            # Update server icon
+            if server_info.get('local_icon_path') and Path(server_info['local_icon_path']).exists():
+                with open(server_info['local_icon_path'], 'rb') as f:
+                    icon_data = f.read()
+                await guild.edit(icon=icon_data)
+                logger.debug("Updated server icon")
+            
+            # Update server banner (if available)
+            if server_info.get('local_banner_path') and Path(server_info['local_banner_path']).exists():
+                with open(server_info['local_banner_path'], 'rb') as f:
+                    banner_data = f.read()
+                await guild.edit(banner=banner_data)
+                logger.debug("Updated server banner")
+            
+            # Update server description
+            if server_info.get('description'):
+                await guild.edit(description=server_info['description'])
+            
+            # Note: Many server settings require specific permissions or boost levels
+            # and cannot be easily recreated
+            
+        except discord.Forbidden:
+            logger.warning("Insufficient permissions to update server settings")
+        except Exception as e:
+            logger.error(f"Failed to apply server settings: {e}")
+            self.stats['errors'].append(f"Failed to apply server settings: {e}")
+    
+    async def _recreate_emojis(self, emojis_data: Dict[str, Any], guild: discord.Guild) -> None:
+        """Recreate server emojis"""
+        logger.info("Recreating emojis...")
+        
+        for old_emoji_id, emoji_data in emojis_data.items():
+            try:
+                # Skip if emoji already exists
+                existing_emoji = discord.utils.get(guild.emojis, name=emoji_data['name'])
+                if existing_emoji:
+                    continue
+                
+                # Check emoji limits
+                if len(guild.emojis) >= guild.emoji_limit:
+                    logger.warning("Emoji limit reached, skipping remaining emojis")
+                    break
+                
+                # Load emoji file
+                emoji_path = emoji_data.get('local_path')
+                if not emoji_path or not Path(emoji_path).exists():
+                    logger.warning(f"Emoji file not found: {emoji_data['name']}")
+                    continue
+                
+                with open(emoji_path, 'rb') as f:
+                    emoji_bytes = f.read()
+                
+                # Create emoji
+                new_emoji = await guild.create_custom_emoji(
+                    name=emoji_data['name'],
+                    image=emoji_bytes,
+                    reason="Server recreation from backup"
+                )
+                
+                logger.debug(f"Created emoji: {emoji_data['name']}")
+                await asyncio.sleep(1)  # Rate limiting
+                
+            except discord.Forbidden:
+                logger.error(f"No permission to create emoji: {emoji_data['name']}")
+            except discord.HTTPException as e:
+                logger.error(f"Failed to create emoji {emoji_data['name']}: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error creating emoji {emoji_data['name']}: {e}")
+    
+    async def _recreate_stickers(self, stickers_data: Dict[str, Any], guild: discord.Guild) -> None:
+        """Recreate server stickers"""
+        logger.info("Recreating stickers...")
+        
+        for old_sticker_id, sticker_data in stickers_data.items():
+            try:
+                # Skip if sticker already exists
+                existing_sticker = discord.utils.get(guild.stickers, name=sticker_data['name'])
+                if existing_sticker:
+                    continue
+                
+                # Check sticker limits
+                if len(guild.stickers) >= guild.sticker_limit:
+                    logger.warning("Sticker limit reached, skipping remaining stickers")
+                    break
+                
+                # Load sticker file
+                sticker_path = sticker_data.get('local_path')
+                if not sticker_path or not Path(sticker_path).exists():
+                    logger.warning(f"Sticker file not found: {sticker_data['name']}")
+                    continue
+                
+                with open(sticker_path, 'rb') as f:
+                    sticker_bytes = f.read()
+                
+                # Create sticker
+                new_sticker = await guild.create_sticker(
+                    name=sticker_data['name'],
+                    description=sticker_data.get('description', ''),
+                    emoji='📁',  # Default emoji for sticker
+                    file=discord.File(fp=sticker_path),
+                    reason="Server recreation from backup"
+                )
+                
+                logger.debug(f"Created sticker: {sticker_data['name']}")
+                await asyncio.sleep(1)  # Rate limiting
+                
+            except discord.Forbidden:
+                logger.error(f"No permission to create sticker: {sticker_data['name']}")
+            except discord.HTTPException as e:
+                logger.error(f"Failed to create sticker {sticker_data['name']}: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error creating sticker {sticker_data['name']}: {e}")
+    
+    async def _restore_messages(self, channels_data: Dict[str, Any], guild: discord.Guild) -> None:
+        """Restore messages to channels (limited functionality)"""
+        logger.info("Restoring messages...")
+        
+        # Note: Message restoration is limited because:
+        # 1. Cannot restore messages with original timestamps
+        # 2. Cannot restore messages from other users
+        # 3. Rate limits make this very slow
+        
+        for old_channel_id, channel_data in channels_data.items():
+            if old_channel_id not in self.channel_mapping:
+                continue
+            
+            new_channel_id = self.channel_mapping[old_channel_id]
+            channel = guild.get_channel(int(new_channel_id))
+            
+            if not channel or not hasattr(channel, 'send'):
+                continue
+            
+            messages = channel_data.get('messages', [])
+            
+            # Only restore a limited number of recent messages as webhooks
+            # This is a demonstration - full message restoration would require webhooks
+            # and significant additional complexity
+            
+            for message in messages[-10:]:  # Last 10 messages only
+                try:
+                    content = message.get('content', '')
+                    if not content:
+                        continue
+                    
+                    # Create a simple message indicating this is from backup
+                    backup_content = f"**[BACKUP]** {message['author']['username']}: {content}"
+                    
+                    await channel.send(backup_content[:2000])  # Discord message limit
+                    self.stats['messages_restored'] += 1
+                    
+                    await asyncio.sleep(2)  # Heavy rate limiting for messages
+                    
+                except Exception as e:
+                    logger.error(f"Failed to restore message: {e}")
+                    break  # Stop on first error to avoid spam

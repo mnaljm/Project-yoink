@@ -1,0 +1,26 @@
+{
+  "discord": {
+    "bot_token": "YOUR_BOT_TOKEN_HERE",
+    "user_token": "YOUR_USER_TOKEN_HERE (OPTIONAL - for enhanced permissions)"
+  },
+  "settings": {
+    "download_media": true,
+    "download_voice_messages": true,
+    "download_avatars": false,
+    "backup_reactions": true,
+    "backup_message_history": true,
+    "backup_forwarded_messages": true,
+    "max_messages_per_channel": 0,
+    "rate_limit_delay": 1.0,
+    "chunk_size": 100,
+    "media_folder": "media",
+    "backup_folder": "backups"
+  },
+  "filters": {
+    "exclude_channels": [],
+    "include_only_channels": [],
+    "exclude_users": [],
+    "date_from": null,
+    "date_to": null
+  }
+}
