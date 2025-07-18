@@ -115,7 +115,7 @@ class DataExporter:
                 template_content = self._get_default_html_template()
             
             # Prepare data for template
-            template_data = self._prepare_template_data(backup_data)
+            template_data = self._prepare_template_data(backup_data, output_path)
             
             # Render template
             template = Template(template_content)
@@ -134,7 +134,7 @@ class DataExporter:
             logger.error(f"Failed to export to HTML: {e}")
             raise
     
-    def _prepare_template_data(self, backup_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _prepare_template_data(self, backup_data: Dict[str, Any], output_path: str) -> Dict[str, Any]:
         """Prepare data for HTML template rendering"""
         server_info = backup_data.get('server_info', {})
         channels = backup_data.get('channels', {})

@@ -39,14 +39,14 @@
 
 **Windows:**
 ```cmd
-git clone https://github.com/your-username/discord-yoink.git
+git clone https://github.com/mnaljm/discord-yoink.git
 cd discord-yoink
 setup.bat
 ```
 
 **Linux/macOS:**
 ```bash
-git clone https://github.com/your-username/discord-yoink.git
+git clone https://github.com/mnaljm/discord-yoink.git
 cd discord-yoink
 chmod +x setup.sh
 ./setup.sh
@@ -54,7 +54,7 @@ chmod +x setup.sh
 
 #### Option 2: Manual Setup
 ```bash
-git clone https://github.com/your-username/discord-yoink.git
+git clone https://github.com/mnaljm/discord-yoink.git
 cd discord-yoink
 pip install -r requirements.txt
 python setup.py
