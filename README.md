@@ -59,7 +59,7 @@ chmod +x setup.sh
 git clone https://github.com/mnaljm/discord-yoink.git
 cd discord-yoink
 pip install -r requirements.txt
-python setup.py
+python project_setup.py
 ```
 
 ### 🤖 Discord Bot Setup
@@ -265,6 +265,58 @@ Discord Yoink can recreate servers from backups with the following features:
 - Cross-server forwarded content may be limited (Discord API restriction)
 - Large message restorations are slow due to Discord rate limits
 - Requires bot permissions on target server
+
+## ⚙️ Development & Building
+
+### Development Setup
+```bash
+# Clone the repository
+git clone https://github.com/mnaljm/discord-yoink.git
+cd discord-yoink
+
+# Install development dependencies
+pip install -r requirements.txt
+pip install -e .[dev]
+
+# Run project setup
+python project_setup.py
+
+# Format code with black
+black src/ discord_yoink.py
+
+# Run tests
+pytest
+```
+
+### Building the Package
+```bash
+# Install build dependencies
+pip install build
+
+# Build the package
+python -m build
+
+# This creates:
+# - dist/discord_yoink-1.1.1.tar.gz (source distribution)
+# - dist/discord_yoink-1.1.1-py3-none-any.whl (wheel distribution)
+```
+
+### Project Structure
+```
+discord-yoink/
+├── src/                    # Source code modules
+│   ├── backup_manager.py   # Main backup logic
+│   ├── discord_client.py   # Discord API wrapper
+│   ├── exporter.py         # Export functionality
+│   └── ...
+├── discord_yoink.py        # Main CLI application
+├── project_setup.py        # Project configuration script
+├── setup.py               # Package setup (minimal)
+├── pyproject.toml         # Package configuration
+└── config.example.json    # Configuration template
+```
+
+**Note**: `project_setup.py` is the script that configures your project for first use (creates config.json, directories, etc.). The `setup.py` file is minimal and only used by the build system.
 
 ## ⚠️ Limitations
 

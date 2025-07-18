@@ -18,12 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Incremental backup feature now fully functional (previously only flagged but not implemented)
 - Improved backup timestamp detection and message filtering logic
+- Fixed build system conflicts by separating project setup from package setup
+- Resolved CI/CD build errors caused by setup.py confusion
+
+### Changed
+- **Project Setup Changes**: Separated project configuration from package setup
+  - Renamed `setup.py` to `project_setup.py` for project configuration
+  - Created minimal `setup.py` for package building
+  - Updated `setup.bat` and `setup.sh` scripts to use `project_setup.py`
+  - Fixed `pyproject.toml` package configuration
 
 ### Technical
 - Added `_find_last_backup_timestamp()` method for backup history detection
 - Added `_should_backup_message()` method for incremental filtering logic
 - Enhanced logging for incremental backup operations
 - Code formatting updated to black standards
+- Improved build system compatibility and CI/CD pipeline
 
 ## [1.1.0] - 2025-07-18
 

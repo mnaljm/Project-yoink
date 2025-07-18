@@ -55,7 +55,7 @@ fi
 
 # Run setup script
 echo "Running setup script..."
-$PYTHON_CMD setup.py
+$PYTHON_CMD project_setup.py
 
 echo ""
 echo "Setup complete! You can now use Discord Yoink."

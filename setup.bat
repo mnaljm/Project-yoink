@@ -55,7 +55,7 @@ echo [OK] Dependencies installed successfully
 
 REM Run setup script
 echo Running setup script...
-python setup.py
+python project_setup.py
 
 echo.
 echo Setup complete! You can now use Discord Yoink.

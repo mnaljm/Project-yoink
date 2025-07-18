@@ -72,7 +72,7 @@ jobs:
 
     - name: Test setup script
       run: |
-        python setup.py --help || echo "Setup script executed"
+        python project_setup.py --help || echo "Setup script executed"
 
   security:
     runs-on: ubuntu-latest
