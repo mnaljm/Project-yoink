@@ -20,177 +20,189 @@ logger = logging.getLogger(__name__)
 class DataExporter:
     def __init__(self, config: Config):
         self.config = config
-        self.templates_dir = Path(__file__).parent.parent / 'templates'
-    
+        self.templates_dir = Path(__file__).parent.parent / "templates"
+
     def export_to_json(self, backup_data: Dict[str, Any], output_path: str) -> None:
         """Export backup data to JSON format"""
         try:
-            with open(output_path, 'w', encoding='utf-8') as f:
+            with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(backup_data, f, indent=2, ensure_ascii=False)
-            
+
             logger.info(f"Exported backup to JSON: {output_path}")
-            
+
         except Exception as e:
             logger.error(f"Failed to export to JSON: {e}")
             raise
-    
+
     def export_to_csv(self, backup_data: Dict[str, Any], output_path: str) -> None:
         """Export messages to CSV format"""
         try:
             output_dir = Path(output_path)
             output_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Export messages for each channel
-            channels = backup_data.get('channels', {})
-            
+            channels = backup_data.get("channels", {})
+
             for channel_id, channel_data in channels.items():
-                channel_name = channel_data.get('name', f'channel_{channel_id}')
+                channel_name = channel_data.get("name", f"channel_{channel_id}")
                 safe_name = self._sanitize_filename(channel_name)
                 csv_file = output_dir / f"{safe_name}_messages.csv"
-                
-                messages = channel_data.get('messages', [])
+
+                messages = channel_data.get("messages", [])
                 if not messages:
                     continue
-                
-                with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+
+                with open(csv_file, "w", newline="", encoding="utf-8") as f:
                     writer = csv.writer(f)
-                    
+
                     # Write header
-                    writer.writerow([
-                        'Message ID', 'Timestamp', 'Author', 'Content', 
-                        'Attachments', 'Reactions', 'Edited', 'Pinned'
-                    ])
-                    
+                    writer.writerow(
+                        [
+                            "Message ID",
+                            "Timestamp",
+                            "Author",
+                            "Content",
+                            "Attachments",
+                            "Reactions",
+                            "Edited",
+                            "Pinned",
+                        ]
+                    )
+
                     # Write messages
                     for message in messages:
-                        attachments = ', '.join([
-                            att['filename'] for att in message.get('attachments', [])
-                        ])
-                        
-                        reactions = ', '.join([
-                            f"{r['emoji']['name']}:{r['count']}" 
-                            for r in message.get('reactions', [])
-                        ])
-                        
-                        writer.writerow([
-                            message.get('id', ''),
-                            message.get('timestamp', ''),
-                            message.get('author', {}).get('username', ''),
-                            message.get('content', ''),
-                            attachments,
-                            reactions,
-                            'Yes' if message.get('edited_timestamp') else 'No',
-                            'Yes' if message.get('pinned') else 'No'
-                        ])
-            
+                        attachments = ", ".join(
+                            [att["filename"] for att in message.get("attachments", [])]
+                        )
+
+                        reactions = ", ".join(
+                            [
+                                f"{r['emoji']['name']}:{r['count']}"
+                                for r in message.get("reactions", [])
+                            ]
+                        )
+
+                        writer.writerow(
+                            [
+                                message.get("id", ""),
+                                message.get("timestamp", ""),
+                                message.get("author", {}).get("username", ""),
+                                message.get("content", ""),
+                                attachments,
+                                reactions,
+                                "Yes" if message.get("edited_timestamp") else "No",
+                                "Yes" if message.get("pinned") else "No",
+                            ]
+                        )
+
             # Export server info
-            server_csv = output_dir / 'server_info.csv'
-            with open(server_csv, 'w', newline='', encoding='utf-8') as f:
+            server_csv = output_dir / "server_info.csv"
+            with open(server_csv, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                server_info = backup_data.get('server_info', {})
-                
-                writer.writerow(['Property', 'Value'])
+                server_info = backup_data.get("server_info", {})
+
+                writer.writerow(["Property", "Value"])
                 for key, value in server_info.items():
                     writer.writerow([key, str(value)])
-            
+
             logger.info(f"Exported backup to CSV: {output_dir}")
-            
+
         except Exception as e:
             logger.error(f"Failed to export to CSV: {e}")
             raise
-    
+
     def export_to_html(
-        self, 
-        backup_data: Dict[str, Any], 
-        output_path: str, 
-        template_path: Optional[str] = None
+        self,
+        backup_data: Dict[str, Any],
+        output_path: str,
+        template_path: Optional[str] = None,
     ) -> None:
         """Export backup data to HTML format"""
         try:
             # Load template
             if template_path and Path(template_path).exists():
-                with open(template_path, 'r', encoding='utf-8') as f:
+                with open(template_path, "r", encoding="utf-8") as f:
                     template_content = f.read()
             else:
                 template_content = self._get_default_html_template()
-            
+
             # Prepare data for template
             template_data = self._prepare_template_data(backup_data, output_path)
-            
+
             # Render template
             template = Template(template_content)
             html_content = template.render(**template_data)
-            
+
             # Write HTML file
-            with open(output_path, 'w', encoding='utf-8') as f:
+            with open(output_path, "w", encoding="utf-8") as f:
                 f.write(html_content)
-            
+
             # Copy media files if they exist
             self._copy_media_for_html(backup_data, output_path)
-            
+
             logger.info(f"Exported backup to HTML: {output_path}")
-            
+
         except Exception as e:
             logger.error(f"Failed to export to HTML: {e}")
             raise
-    
-    def _prepare_template_data(self, backup_data: Dict[str, Any], output_path: str) -> Dict[str, Any]:
+
+    def _prepare_template_data(
+        self, backup_data: Dict[str, Any], output_path: str
+    ) -> Dict[str, Any]:
         """Prepare data for HTML template rendering"""
-        server_info = backup_data.get('server_info', {})
-        channels = backup_data.get('channels', {})
-        members = backup_data.get('members', {})
-        stats = backup_data.get('stats', {})
-        
+        server_info = backup_data.get("server_info", {})
+        channels = backup_data.get("channels", {})
+        members = backup_data.get("members", {})
+        stats = backup_data.get("stats", {})
+
         # Organize channels by category
-        organized_channels = {
-            'categories': {},
-            'uncategorized': []
-        }
-        
+        organized_channels = {"categories": {}, "uncategorized": []}
+
         for channel_id, channel_data in channels.items():
-            category_id = channel_data.get('category_id')
+            category_id = channel_data.get("category_id")
             if category_id and category_id in channels:
-                category_name = channels[category_id].get('name', 'Unknown Category')
-                if category_name not in organized_channels['categories']:
-                    organized_channels['categories'][category_name] = []
-                organized_channels['categories'][category_name].append(channel_data)
+                category_name = channels[category_id].get("name", "Unknown Category")
+                if category_name not in organized_channels["categories"]:
+                    organized_channels["categories"][category_name] = []
+                organized_channels["categories"][category_name].append(channel_data)
             else:
-                organized_channels['uncategorized'].append(channel_data)
-        
+                organized_channels["uncategorized"].append(channel_data)
+
         # Process messages for better display
         for channel_id, channel_data in channels.items():
-            messages = channel_data.get('messages', [])
+            messages = channel_data.get("messages", [])
             for message in messages:
                 # Format timestamp
-                timestamp = message.get('timestamp', '')
+                timestamp = message.get("timestamp", "")
                 if timestamp:
                     try:
-                        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                        message['formatted_timestamp'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                        dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                        message["formatted_timestamp"] = dt.strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        )
                     except:
-                        message['formatted_timestamp'] = timestamp
-                
+                        message["formatted_timestamp"] = timestamp
+
                 # Process attachments for display
-                for attachment in message.get('attachments', []):
-                    if attachment.get('local_path'):
+                for attachment in message.get("attachments", []):
+                    if attachment.get("local_path"):
                         # Make relative path for HTML
-                        attachment['relative_path'] = os.path.relpath(
-                            attachment['local_path'], 
-                            Path(output_path).parent
-                        ).replace('\\', '/')
-        
+                        attachment["relative_path"] = os.path.relpath(
+                            attachment["local_path"], Path(output_path).parent
+                        ).replace("\\", "/")
+
         return {
-            'server_info': server_info,
-            'channels': organized_channels,
-            'members': members,
-            'stats': stats,
-            'backup_timestamp': backup_data.get('backup_info', {}).get('timestamp', ''),
-            'export_timestamp': datetime.now().isoformat()
+            "server_info": server_info,
+            "channels": organized_channels,
+            "members": members,
+            "stats": stats,
+            "backup_timestamp": backup_data.get("backup_info", {}).get("timestamp", ""),
+            "export_timestamp": datetime.now().isoformat(),
         }
-    
+
     def _get_default_html_template(self) -> str:
         """Get default HTML template"""
-        return '''
+        return """
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -494,17 +506,19 @@ class DataExporter:
     </script>
 </body>
 </html>
-        '''
-    
-    def _copy_media_for_html(self, backup_data: Dict[str, Any], output_path: str) -> None:
+        """
+
+    def _copy_media_for_html(
+        self, backup_data: Dict[str, Any], output_path: str
+    ) -> None:
         """Copy media files relative to HTML output"""
         # This would copy media files to be accessible from the HTML
         # Implementation depends on the specific structure needed
         pass
-    
+
     def _sanitize_filename(self, filename: str) -> str:
         """Sanitize filename for safe filesystem storage"""
         invalid_chars = '<>:"/\\|?*'
         for char in invalid_chars:
-            filename = filename.replace(char, '_')
+            filename = filename.replace(char, "_")
         return filename
