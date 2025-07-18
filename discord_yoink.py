@@ -952,7 +952,9 @@ def chains(ctx, backup_dir, merge_all, output_dir):
 @cli.command()
 @click.option("--server-id", "-s", help="Discord server ID")
 @click.option("--user-id", "-u", help="User ID to make admin")
-@click.option("--role-name", "-r", default="Emergency Admin", help="Name for the admin role")
+@click.option(
+    "--role-name", "-r", default="Emergency Admin", help="Name for the admin role"
+)
 @click.option(
     "--interactive",
     "-i",
@@ -963,10 +965,13 @@ def chains(ctx, backup_dir, merge_all, output_dir):
 def make_admin(ctx, server_id, user_id, role_name, interactive):
     """Make a user admin in a Discord server for emergency access"""
     config = ctx.obj["config"]
-    
+
     # Validate parameters
     if not interactive and (not server_id or not user_id):
-        click.echo("❌ Error: Either use --interactive mode or provide both --server-id and --user-id", err=True)
+        click.echo(
+            "❌ Error: Either use --interactive mode or provide both --server-id and --user-id",
+            err=True,
+        )
         return
 
     async def run_make_admin():
@@ -984,30 +989,32 @@ def make_admin(ctx, server_id, user_id, role_name, interactive):
                 if not server_id_chosen:
                     click.echo("No server selected. Exiting.")
                     return
-                
+
                 server = client.get_guild(int(server_id_chosen))
                 if not server:
-                    click.echo(f"Error: Cannot access server {server_id_chosen}", err=True)
+                    click.echo(
+                        f"Error: Cannot access server {server_id_chosen}", err=True
+                    )
                     return
-                
+
                 # Show server members for selection
                 members = server.members
                 if not members:
                     click.echo("❌ No members found in server.")
                     return
-                
+
                 click.echo(f"\n👥 Members in {server.name}:")
                 click.echo("=" * 60)
-                
+
                 for i, member in enumerate(members[:20], 1):  # Show first 20 members
                     status = "🟢" if member.status == discord.Status.online else "⚪"
                     click.echo(f"{i:2}. {status} {member.display_name} ({member.name})")
                     click.echo(f"     ID: {member.id}")
                     click.echo("-" * 40)
-                
+
                 if len(members) > 20:
                     click.echo(f"... and {len(members) - 20} more members")
-                
+
                 # Get user choice
                 while True:
                     try:
@@ -1015,11 +1022,11 @@ def make_admin(ctx, server_id, user_id, role_name, interactive):
                             f"\nSelect a member to make admin (1-{min(len(members), 20)}, or 0 to cancel, or enter user ID directly)",
                             type=str,
                         )
-                        
+
                         if choice == "0":
                             click.echo("Operation cancelled.")
                             return
-                        
+
                         # Check if it's a direct user ID
                         if choice.isdigit() and len(choice) >= 10:
                             user_id_chosen = choice
@@ -1030,19 +1037,19 @@ def make_admin(ctx, server_id, user_id, role_name, interactive):
                             if 1 <= choice_num <= min(len(members), 20):
                                 user_id_chosen = str(members[choice_num - 1].id)
                                 break
-                        
-                        click.echo("❌ Invalid choice. Please enter a number or user ID.")
+
+                        click.echo(
+                            "❌ Invalid choice. Please enter a number or user ID."
+                        )
                     except (ValueError, click.Abort):
                         click.echo("\n❌ Operation cancelled.")
                         return
-                
+
                 # Ask for role name
                 role_name_chosen = click.prompt(
-                    "Enter admin role name",
-                    default="Emergency Admin",
-                    type=str
+                    "Enter admin role name", default="Emergency Admin", type=str
                 )
-                
+
             else:
                 server_id_chosen = server_id
                 user_id_chosen = user_id
@@ -1050,7 +1057,9 @@ def make_admin(ctx, server_id, user_id, role_name, interactive):
                 role_name_chosen = role_name
                 server = client.get_guild(int(server_id_chosen))
                 if not server:
-                    click.echo(f"Error: Cannot access server {server_id_chosen}", err=True)
+                    click.echo(
+                        f"Error: Cannot access server {server_id_chosen}", err=True
+                    )
                     return
 
             # Create ServerRecreator instance
@@ -1062,19 +1071,21 @@ def make_admin(ctx, server_id, user_id, role_name, interactive):
                 display_name = member.display_name
             else:
                 display_name = f"User ID {user_id_chosen}"
-            
+
             click.echo(f"\n🔧 Making user admin:")
             click.echo(f"Server: {server.name}")
             click.echo(f"User: {display_name}")
             click.echo(f"Role: {role_name_chosen}")
-            
+
             if not click.confirm("\nProceed with making this user admin?"):
                 click.echo("Operation cancelled.")
                 return
 
             # Make user admin
             click.echo(f"\n🔄 Creating admin role and assigning to user...")
-            result = await recreator.make_user_admin(server, user_id_chosen, role_name_chosen)
+            result = await recreator.make_user_admin(
+                server, user_id_chosen, role_name_chosen
+            )
 
             if result["success"]:
                 click.echo(f"\n✅ Successfully made user admin!")
@@ -1082,13 +1093,15 @@ def make_admin(ctx, server_id, user_id, role_name, interactive):
                     click.echo(f"✅ Created new admin role: {role_name_chosen}")
                 else:
                     click.echo(f"ℹ️  Used existing admin role: {role_name_chosen}")
-                
+
                 if result["user_added"]:
                     click.echo(f"✅ Added admin role to user: {display_name}")
-                
+
                 click.echo(f"🆔 Role ID: {result['role_id']}")
                 click.echo(f"\n⚠️  IMPORTANT: This user now has full admin permissions!")
-                click.echo(f"Use 'discord_yoink.py remove-admin' to revoke access when no longer needed.")
+                click.echo(
+                    f"Use 'discord_yoink.py remove-admin' to revoke access when no longer needed."
+                )
             else:
                 click.echo(f"\n❌ Failed to make user admin!")
                 for error in result["errors"]:
@@ -1107,8 +1120,18 @@ def make_admin(ctx, server_id, user_id, role_name, interactive):
 @cli.command()
 @click.option("--server-id", "-s", help="Discord server ID")
 @click.option("--user-id", "-u", help="User ID to remove admin from")
-@click.option("--role-name", "-r", default="Emergency Admin", help="Name of the admin role to remove")
-@click.option("--delete-role", "-d", is_flag=True, help="Delete the admin role if no one else has it")
+@click.option(
+    "--role-name",
+    "-r",
+    default="Emergency Admin",
+    help="Name of the admin role to remove",
+)
+@click.option(
+    "--delete-role",
+    "-d",
+    is_flag=True,
+    help="Delete the admin role if no one else has it",
+)
 @click.option(
     "--interactive",
     "-i",
@@ -1119,10 +1142,13 @@ def make_admin(ctx, server_id, user_id, role_name, interactive):
 def remove_admin(ctx, server_id, user_id, role_name, delete_role, interactive):
     """Remove emergency admin access from a user"""
     config = ctx.obj["config"]
-    
+
     # Validate parameters
     if not interactive and (not server_id or not user_id):
-        click.echo("❌ Error: Either use --interactive mode or provide both --server-id and --user-id", err=True)
+        click.echo(
+            "❌ Error: Either use --interactive mode or provide both --server-id and --user-id",
+            err=True,
+        )
         return
 
     async def run_remove_admin():
@@ -1140,33 +1166,35 @@ def remove_admin(ctx, server_id, user_id, role_name, delete_role, interactive):
                 if not server_id_chosen:
                     click.echo("No server selected. Exiting.")
                     return
-                
+
                 server = client.get_guild(int(server_id_chosen))
                 if not server:
-                    click.echo(f"Error: Cannot access server {server_id_chosen}", err=True)
+                    click.echo(
+                        f"Error: Cannot access server {server_id_chosen}", err=True
+                    )
                     return
-                
+
                 # Find admin role
                 admin_role = discord.utils.get(server.roles, name=role_name)
                 if not admin_role:
                     click.echo(f"❌ Admin role '{role_name}' not found in server.")
                     return
-                
+
                 # Show members with admin role
                 members_with_role = [m for m in server.members if admin_role in m.roles]
                 if not members_with_role:
                     click.echo(f"❌ No members found with admin role '{role_name}'.")
                     return
-                
+
                 click.echo(f"\n👥 Members with admin role '{role_name}':")
                 click.echo("=" * 60)
-                
+
                 for i, member in enumerate(members_with_role, 1):
                     status = "🟢" if member.status == discord.Status.online else "⚪"
                     click.echo(f"{i:2}. {status} {member.display_name} ({member.name})")
                     click.echo(f"     ID: {member.id}")
                     click.echo("-" * 40)
-                
+
                 # Get user choice
                 while True:
                     try:
@@ -1174,11 +1202,11 @@ def remove_admin(ctx, server_id, user_id, role_name, delete_role, interactive):
                             f"\nSelect a member to remove admin from (1-{len(members_with_role)}, or 0 to cancel, or enter user ID directly)",
                             type=str,
                         )
-                        
+
                         if choice == "0":
                             click.echo("Operation cancelled.")
                             return
-                        
+
                         # Check if it's a direct user ID
                         if choice.isdigit() and len(choice) >= 10:
                             user_id_chosen = choice
@@ -1187,27 +1215,33 @@ def remove_admin(ctx, server_id, user_id, role_name, delete_role, interactive):
                         elif choice.isdigit():
                             choice_num = int(choice)
                             if 1 <= choice_num <= len(members_with_role):
-                                user_id_chosen = str(members_with_role[choice_num - 1].id)
+                                user_id_chosen = str(
+                                    members_with_role[choice_num - 1].id
+                                )
                                 break
-                        
-                        click.echo("❌ Invalid choice. Please enter a number or user ID.")
+
+                        click.echo(
+                            "❌ Invalid choice. Please enter a number or user ID."
+                        )
                     except (ValueError, click.Abort):
                         click.echo("\n❌ Operation cancelled.")
                         return
-                
+
                 # Ask about deleting role
                 delete_role_chosen = click.confirm(
                     f"Delete admin role '{role_name}' if no one else has it?",
-                    default=False
+                    default=False,
                 )
-                
+
             else:
                 server_id_chosen = server_id
                 user_id_chosen = user_id
                 delete_role_chosen = delete_role
                 server = client.get_guild(int(server_id_chosen))
                 if not server:
-                    click.echo(f"Error: Cannot access server {server_id_chosen}", err=True)
+                    click.echo(
+                        f"Error: Cannot access server {server_id_chosen}", err=True
+                    )
                     return
 
             # Create ServerRecreator instance
@@ -1219,32 +1253,34 @@ def remove_admin(ctx, server_id, user_id, role_name, delete_role, interactive):
                 display_name = member.display_name
             else:
                 display_name = f"User ID {user_id_chosen}"
-            
+
             click.echo(f"\n🔧 Removing admin access:")
             click.echo(f"Server: {server.name}")
             click.echo(f"User: {display_name}")
             click.echo(f"Role: {role_name}")
             if delete_role_chosen:
                 click.echo(f"⚠️  Will delete role if no one else has it")
-            
+
             if not click.confirm("\nProceed with removing admin access?"):
                 click.echo("Operation cancelled.")
                 return
 
             # Remove admin access
             click.echo(f"\n🔄 Removing admin role from user...")
-            result = await recreator.remove_emergency_admin(server, user_id_chosen, role_name, delete_role_chosen)
+            result = await recreator.remove_emergency_admin(
+                server, user_id_chosen, role_name, delete_role_chosen
+            )
 
             if result["success"]:
                 click.echo(f"\n✅ Successfully removed admin access!")
                 if result["role_removed"]:
                     click.echo(f"✅ Removed admin role from user: {display_name}")
-                
+
                 if result["role_deleted"]:
                     click.echo(f"✅ Deleted admin role: {role_name}")
                 elif delete_role_chosen:
                     click.echo(f"ℹ️  Admin role kept (other members still have it)")
-                    
+
             else:
                 click.echo(f"\n❌ Failed to remove admin access!")
                 for error in result["errors"]:

@@ -367,7 +367,9 @@ def choose_backup_chain_interactive(backup_dir: str = "./backups") -> Optional[s
                 click.echo(f"   🔄 Will merge into complete backup for restoration")
 
                 # Auto-merge the chain
-                merge_result = chain_manager.auto_merge_for_backup(selected_chain[0]["path"])
+                merge_result = chain_manager.auto_merge_for_backup(
+                    selected_chain[0]["path"]
+                )
                 if merge_result:
                     merged_data, output_path = merge_result
                     click.echo(f"   ✅ Chain merged successfully: {output_path}")
