@@ -31,7 +31,7 @@ def create_config_file():
         json.dump(config_data, f, indent=2)
 
     print("[OK] Created config.json from template")
-    print("  → Please edit config.json and add your Discord bot token")
+    print("  -> Please edit config.json and add your Discord bot token")
 
 
 def create_directories():
