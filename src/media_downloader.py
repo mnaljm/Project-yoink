@@ -53,7 +53,7 @@ class MediaDownloader:
 
     def _get_file_hash(self, url: str) -> str:
         """Generate a hash for the URL to avoid duplicate downloads"""
-        return hashlib.md5(url.encode()).hexdigest()
+        return hashlib.md5(url.encode(), usedforsecurity=False).hexdigest()
 
     async def download_file(
         self, url: str, filename: str, base_dir: Path, max_size_mb: int = 100

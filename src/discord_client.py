@@ -359,7 +359,11 @@ class DiscordYoinkClient(commands.Bot):
                             len(reaction_info["users"]) >= 100
                         ):  # Limit to prevent excessive API calls
                             break
-                except:
+                except Exception as e:
+                    # Log the exception and continue processing
+                    # This handles cases where reaction users cannot be accessed
+                    # (e.g., permissions, API rate limits, network issues)
+                    print(f"Warning: Could not fetch reaction users: {e}")
                     pass
 
                 message_info["reactions"].append(reaction_info)
