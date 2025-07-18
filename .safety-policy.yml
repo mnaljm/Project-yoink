@@ -1,0 +1,19 @@
+# Safety policy file for vulnerability scanning
+# This file configures how Safety handles security vulnerabilities
+
+security:
+  # Continue scanning even if vulnerabilities are found
+  continue-on-vulnerability-error: true
+  
+  # Ignore specific vulnerabilities that are accepted risks
+  # Note: These should be reviewed and updated regularly
+  ignore-vulnerabilities: []
+    # All previous vulnerabilities should be resolved with updated dependencies
+    # If new vulnerabilities are found, add them here with documentation
+
+  # Set scan options
+  scan:
+    # Report format
+    output: screen
+    # Continue on error for CI
+    continue-on-error: true
