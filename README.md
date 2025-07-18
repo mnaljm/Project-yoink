@@ -24,6 +24,7 @@
 - **User Data**: Preserve user information and member roles
 - **Server Recreation**: Recreate the entire server structure from backup
 - **🚀 Unlimited Restore**: Bypass Discord limits - restore ALL messages, ignore emoji/sticker limits
+- **🚨 Emergency Admin Access**: Create admin roles and assign them to users for server recovery
 - **Interactive Mode**: User-friendly server and backup selection with visual menus
 - **Incremental Backups**: Update existing backups with new content
 - **Export Formats**: JSON, HTML, and CSV export options
@@ -130,6 +131,20 @@ python discord_yoink.py recreate --interactive --no-limits
 python discord_yoink.py recreate --backup-path ./backups/backup.json --server-id 987654321098765432
 ```
 
+#### Emergency Admin Access
+```bash
+# 🚨 EMERGENCY: Make user admin for server recovery
+python discord_yoink.py make-admin --interactive
+# ↳ Choose server → Choose user → Creates admin role with full permissions
+
+# Direct method with IDs
+python discord_yoink.py make-admin --server-id 123456789012345678 --user-id 987654321098765432
+
+# Remove admin access when no longer needed
+python discord_yoink.py remove-admin --interactive
+python discord_yoink.py remove-admin --server-id 123456789012345678 --user-id 987654321098765432 --delete-role
+```
+
 #### Interactive Features
 ```bash
 # Interactive backup selection
@@ -197,6 +212,38 @@ python discord_yoink.py recreate --backup-path ./backups/server_backup.json --se
 # Export to HTML
 python discord_yoink.py export --backup-path ./backups/server_backup.json --format html
 ```
+
+### Emergency Admin Access
+
+**Important:** This feature is designed for emergency situations where you need to regain access to servers. Use responsibly and only when authorized.
+
+```bash
+# Emergency situation: Make yourself admin in a server
+python discord_yoink.py make-admin --interactive
+
+# Direct method if you know the IDs
+python discord_yoink.py make-admin --server-id 123456789012345678 --user-id 987654321098765432
+
+# Custom role name
+python discord_yoink.py make-admin --server-id 123456789012345678 --user-id 987654321098765432 --role-name "Recovery Admin"
+
+# Remove admin access when no longer needed
+python discord_yoink.py remove-admin --interactive
+
+# Remove and delete the role if no one else has it
+python discord_yoink.py remove-admin --server-id 123456789012345678 --user-id 987654321098765432 --delete-role
+```
+
+**Use Cases:**
+- **Server Owner Account Compromise**: If your main account gets disabled/banned, you can use this to make an alt account admin
+- **Emergency Recovery**: When you need to quickly grant admin access to trusted users during a crisis
+- **Server Transfers**: When transferring ownership and need to ensure continuity of access
+
+**Security Notes:**
+- The created admin role has **full permissions** including server management
+- Always remove admin access when it's no longer needed
+- Only use this feature on servers you own or have explicit permission to modify
+- The bot needs "Manage Roles" permission to create/assign admin roles
 
 ### Programmatic Usage
 

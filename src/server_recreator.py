@@ -770,3 +770,193 @@ class ServerRecreator:
         except Exception as e:
             logger.error(f"Error restoring message from {username}: {e}")
             raise
+
+    async def make_user_admin(
+        self, 
+        guild: discord.Guild, 
+        user_id: Union[int, str], 
+        admin_role_name: str = "Emergency Admin"
+    ) -> Dict[str, Any]:
+        """
+        Create an admin role and assign it to a user for emergency access.
+        
+        Args:
+            guild: The Discord guild/server
+            user_id: The user ID to make admin
+            admin_role_name: Name for the admin role (default: "Emergency Admin")
+            
+        Returns:
+            Dict with operation results
+        """
+        results = {
+            "success": False,
+            "role_created": False,
+            "user_added": False,
+            "role_id": None,
+            "errors": []
+        }
+        
+        try:
+            user_id = int(user_id)
+            
+            # Get the user/member
+            member = guild.get_member(user_id)
+            if not member:
+                try:
+                    member = await guild.fetch_member(user_id)
+                except discord.NotFound:
+                    results["errors"].append(f"User {user_id} not found in server")
+                    return results
+            
+            # Check if admin role already exists
+            existing_role = discord.utils.get(guild.roles, name=admin_role_name)
+            
+            if existing_role:
+                # Use existing role
+                admin_role = existing_role
+                results["role_id"] = str(admin_role.id)
+                logger.info(f"Using existing admin role: {admin_role_name}")
+            else:
+                # Create new admin role with full permissions
+                admin_permissions = discord.Permissions.all()
+                
+                admin_role = await guild.create_role(
+                    name=admin_role_name,
+                    permissions=admin_permissions,
+                    color=discord.Color.red(),  # Red color for visibility
+                    hoist=True,  # Show separately in member list
+                    mentionable=True,
+                    reason=f"Emergency admin role for user {user_id}"
+                )
+                
+                results["role_created"] = True
+                results["role_id"] = str(admin_role.id)
+                logger.info(f"Created new admin role: {admin_role_name}")
+                
+                # Move role to top of hierarchy (just below bot's highest role)
+                try:
+                    bot_member = guild.get_member(guild.me.id)
+                    if bot_member and bot_member.top_role:
+                        position = bot_member.top_role.position - 1
+                        await admin_role.edit(position=max(1, position))
+                        logger.info(f"Moved admin role to position {position}")
+                except (discord.Forbidden, discord.HTTPException) as e:
+                    logger.warning(f"Could not move admin role to top: {e}")
+            
+            # Add role to user
+            if admin_role not in member.roles:
+                await member.add_roles(
+                    admin_role, 
+                    reason=f"Emergency admin access granted by Discord Yoink"
+                )
+                results["user_added"] = True
+                logger.info(f"Added admin role to user: {member.display_name}")
+            else:
+                logger.info(f"User {member.display_name} already has admin role")
+                results["user_added"] = True
+            
+            results["success"] = True
+            
+            # Rate limiting
+            await asyncio.sleep(self._get_rate_limit_delay())
+            
+        except discord.Forbidden:
+            error_msg = "Bot lacks permissions to create roles or manage members"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+        except discord.HTTPException as e:
+            error_msg = f"Discord API error: {e}"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error making user admin: {e}"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+        
+        return results
+
+    async def remove_emergency_admin(
+        self, 
+        guild: discord.Guild, 
+        user_id: Union[int, str], 
+        admin_role_name: str = "Emergency Admin",
+        delete_role: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Remove emergency admin access from a user.
+        
+        Args:
+            guild: The Discord guild/server
+            user_id: The user ID to remove admin from
+            admin_role_name: Name of the admin role to remove
+            delete_role: Whether to delete the role entirely
+            
+        Returns:
+            Dict with operation results
+        """
+        results = {
+            "success": False,
+            "role_removed": False,
+            "role_deleted": False,
+            "errors": []
+        }
+        
+        try:
+            user_id = int(user_id)
+            
+            # Get the user/member
+            member = guild.get_member(user_id)
+            if not member:
+                try:
+                    member = await guild.fetch_member(user_id)
+                except discord.NotFound:
+                    results["errors"].append(f"User {user_id} not found in server")
+                    return results
+            
+            # Find the admin role
+            admin_role = discord.utils.get(guild.roles, name=admin_role_name)
+            if not admin_role:
+                results["errors"].append(f"Admin role '{admin_role_name}' not found")
+                return results
+            
+            # Remove role from user
+            if admin_role in member.roles:
+                await member.remove_roles(
+                    admin_role, 
+                    reason=f"Emergency admin access revoked by Discord Yoink"
+                )
+                results["role_removed"] = True
+                logger.info(f"Removed admin role from user: {member.display_name}")
+            else:
+                logger.info(f"User {member.display_name} doesn't have admin role")
+                results["role_removed"] = True
+            
+            # Delete role if requested and no other members have it
+            if delete_role:
+                members_with_role = [m for m in guild.members if admin_role in m.roles]
+                if not members_with_role:
+                    await admin_role.delete(reason="Emergency admin role cleanup")
+                    results["role_deleted"] = True
+                    logger.info(f"Deleted admin role: {admin_role_name}")
+                else:
+                    logger.info(f"Admin role not deleted - still assigned to {len(members_with_role)} members")
+            
+            results["success"] = True
+            
+            # Rate limiting
+            await asyncio.sleep(self._get_rate_limit_delay())
+            
+        except discord.Forbidden:
+            error_msg = "Bot lacks permissions to manage roles or members"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+        except discord.HTTPException as e:
+            error_msg = f"Discord API error: {e}"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error removing admin: {e}"
+            results["errors"].append(error_msg)
+            logger.error(error_msg)
+        
+        return results
