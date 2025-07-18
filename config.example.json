@@ -14,7 +14,9 @@
     "rate_limit_delay": 1.0,
     "chunk_size": 100,
     "media_folder": "media",
-    "backup_folder": "backups"
+    "backup_folder": "backups",
+    "restore_max_messages": 50,
+    "restore_media": true
   },
   "filters": {
     "exclude_channels": [],

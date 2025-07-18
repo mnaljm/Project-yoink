@@ -27,7 +27,7 @@ class BackupManager:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        self.media_downloader = None  # Will be initialized when needed
+        self.media_downloader: Optional[MediaDownloader] = None  # Will be initialized when needed
         self.stats = {
             'total_messages': 0,
             'total_channels': 0,
@@ -89,7 +89,7 @@ class BackupManager:
         try:
             # Backup server information
             logger.info("Backing up server information...")
-            backup_data['server_info'] = await self._backup_server_info(guild, client)
+            backup_data['server_info'] = await self._backup_server_info(guild, client, media_dir)
             
             # Backup roles
             logger.info("Backing up roles...")
@@ -105,7 +105,7 @@ class BackupManager:
             
             # Backup members
             logger.info("Backing up members...")
-            backup_data['members'] = await self._backup_members(guild, client)
+            backup_data['members'] = await self._backup_members(guild, client, media_dir)
             
             # Backup channels and messages
             logger.info("Backing up channels and messages...")
@@ -134,23 +134,25 @@ class BackupManager:
             logger.error(f"Backup failed: {e}")
             raise
     
-    async def _backup_server_info(self, guild, client) -> Dict[str, Any]:
+    async def _backup_server_info(self, guild, client, media_dir: Path) -> Dict[str, Any]:
         """Backup server information and settings"""
         try:
             server_info = await client.get_server_info(guild)
             
-            # Download server icons/banners
-            if server_info.get('icon_url'):
+            # Download server icons/banners to backup-specific folder
+            if server_info.get('icon_url') and self.media_downloader:
                 icon_path = await self.media_downloader.download_image(
                     server_info['icon_url'], 
-                    f"server_icon.{server_info['icon_url'].split('.')[-1]}"
+                    f"server_icon.{server_info['icon_url'].split('.')[-1]}",
+                    media_dir
                 )
                 server_info['local_icon_path'] = icon_path
             
-            if server_info.get('banner_url'):
+            if server_info.get('banner_url') and self.media_downloader:
                 banner_path = await self.media_downloader.download_image(
                     server_info['banner_url'], 
-                    f"server_banner.{server_info['banner_url'].split('.')[-1]}"
+                    f"server_banner.{server_info['banner_url'].split('.')[-1]}",
+                    media_dir
                 )
                 server_info['local_banner_path'] = banner_path
             
@@ -194,7 +196,7 @@ class BackupManager:
                 }
                 
                 # Download emoji
-                if self.config.download_media:
+                if self.config.download_media and self.media_downloader:
                     extension = 'gif' if emoji.animated else 'png'
                     emoji_path = await self.media_downloader.download_image(
                         str(emoji.url), 
@@ -229,7 +231,7 @@ class BackupManager:
                 }
                 
                 # Download sticker
-                if self.config.download_media:
+                if self.config.download_media and self.media_downloader:
                     extension = 'png'  # Most stickers are PNG
                     if sticker.format.name == 'lottie':
                         extension = 'json'
@@ -252,7 +254,7 @@ class BackupManager:
         
         return stickers
     
-    async def _backup_members(self, guild, client) -> Dict[str, Any]:
+    async def _backup_members(self, guild, client, media_dir: Path) -> Dict[str, Any]:
         """Backup all server members"""
         members = {}
         try:
@@ -269,10 +271,12 @@ class BackupManager:
                 # Download member avatar (only if enabled)
                 if (member_info.get('avatar_url') and 
                     self.config.download_media and 
-                    self.config.download_avatars):
+                    self.config.download_avatars and
+                    self.media_downloader):
                     avatar_path = await self.media_downloader.download_image(
                         member_info['avatar_url'], 
-                        f"avatars/{member.id}_avatar.png"
+                        f"avatars/{member.id}_avatar.png",
+                        media_dir  # Use the backup-specific media directory
                     )
                     member_info['local_avatar_path'] = avatar_path
                 
@@ -400,7 +404,7 @@ class BackupManager:
                     #     continue
                     
                     # Download attachments
-                    if message.attachments and self.config.download_media:
+                    if message.attachments and self.config.download_media and self.media_downloader:
                         for i, attachment in enumerate(message.attachments):
                             attachment_path = await self.media_downloader.download_attachment(
                                 attachment, 

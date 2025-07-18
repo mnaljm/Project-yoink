@@ -155,8 +155,14 @@ Backups are saved to `./backups/SERVERNAME_TIMESTAMP/`
 # Backup a server
 python discord_yoink.py backup --server-id YOUR_SERVER_ID --output ./backups/
 
-# Recreate a server
-python discord_yoink.py recreate --backup-path ./backups/server_backup.json --new-server-id NEW_SERVER_ID
+# Recreate a server (with message restoration)
+python discord_yoink.py recreate --backup-path ./backups/server_backup.json --server-id NEW_SERVER_ID
+
+# Recreate structure only (skip messages)
+python discord_yoink.py recreate --backup-path ./backups/server_backup.json --server-id NEW_SERVER_ID --skip-media
+
+# Preview recreation changes
+python discord_yoink.py recreate --backup-path ./backups/server_backup.json --server-id NEW_SERVER_ID --dry-run
 
 # Export to HTML
 python discord_yoink.py export --backup-path ./backups/server_backup.json --format html
@@ -194,6 +200,40 @@ Copy `config.example.json` to `config.json` and customize settings:
 ```
 
 📋 **Full configuration guide:** [Configuration Documentation](docs/configuration.md)
+
+## 🏗️ Server Recreation
+
+Discord Yoink can recreate servers from backups with the following features:
+
+### What Gets Restored
+- ✅ **Server Structure**: Channels, categories, roles, permissions
+- ✅ **Server Settings**: Icon, banner, description (where possible)
+- ✅ **Emojis & Stickers**: Custom server emojis and stickers
+- ✅ **Messages**: Recent messages with original usernames/avatars (via webhooks)
+- ✅ **Media**: Attachments and images (if available in backup)
+
+### Message Restoration Features
+- Uses webhooks to preserve original usernames and avatars
+- Configurable message limit per channel (default: 50 recent messages)
+- Includes forwarded message metadata and cross-server forwarding notes
+- Preserves message timestamps as notes (original timestamps cannot be restored)
+- Rate-limited to respect Discord API limits
+
+### Configuration Options
+```json
+{
+  "settings": {
+    "restore_max_messages": 50,    // Messages per channel (0 = none)
+    "restore_media": true          // Include media/attachments
+  }
+}
+```
+
+### Recreation Limitations
+- Messages restored with current timestamp (original time shown in footer)
+- Cross-server forwarded content may be limited (Discord API restriction)
+- Large message restorations are slow due to Discord rate limits
+- Requires bot permissions on target server
 
 ## ⚠️ Limitations
 

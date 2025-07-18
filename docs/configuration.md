@@ -25,13 +25,17 @@ This guide explains all configuration options available in `config.json`.
   "settings": {
     "download_media": true,
     "download_voice_messages": true,
+    "download_avatars": false,
     "backup_reactions": true,
     "backup_message_history": true,
+    "backup_forwarded_messages": true,
     "max_messages_per_channel": 0,
     "rate_limit_delay": 1.0,
     "chunk_size": 100,
     "media_folder": "media",
-    "backup_folder": "backups"
+    "backup_folder": "backups",
+    "restore_max_messages": 50,
+    "restore_media": true
   }
 }
 ```
@@ -40,13 +44,17 @@ This guide explains all configuration options available in `config.json`.
 
 - **download_media** (boolean): Whether to download images, videos, and files
 - **download_voice_messages** (boolean): Whether to download voice messages
+- **download_avatars** (boolean): Whether to download user avatars (disabled by default for size)
 - **backup_reactions** (boolean): Whether to backup message reactions
 - **backup_message_history** (boolean): Whether to backup message content
+- **backup_forwarded_messages** (boolean): Whether to backup forwarded messages (including cross-server)
 - **max_messages_per_channel** (integer): Maximum messages per channel (0 = unlimited)
 - **rate_limit_delay** (float): Delay between API requests in seconds
 - **chunk_size** (integer): Number of messages to process at once
 - **media_folder** (string): Folder name for downloaded media
 - **backup_folder** (string): Folder name for backup files
+- **restore_max_messages** (integer): Maximum messages to restore per channel during server recreation
+- **restore_media** (boolean): Whether to restore media/attachments during server recreation
 
 ## Filters
 
@@ -123,6 +131,39 @@ This guide explains all configuration options available in `config.json`.
   }
 }
 ```
+
+## Server Recreation Settings
+
+When recreating servers from backups, these settings control how messages and media are restored:
+
+```json
+{
+  "settings": {
+    "restore_max_messages": 50,
+    "restore_media": true
+  }
+}
+```
+
+#### Restoration Details
+
+- **restore_max_messages**: Maximum number of recent messages to restore per channel (default: 50)
+  - Set to 0 to disable message restoration
+  - Higher values take significantly longer due to Discord rate limits
+  - Recommended: 10-100 for reasonable restoration time
+
+- **restore_media**: Whether to restore media attachments with messages
+  - Requires original media files to be present in backup
+  - Large files (>25MB) will be skipped due to Discord limits
+  - May significantly increase restoration time
+
+#### Message Restoration Limitations
+
+- Messages are restored with current timestamp (cannot preserve original times)
+- Uses webhooks to approximate original usernames and avatars when possible
+- Cross-server forwarded messages may have limited content due to Discord API restrictions
+- Rate limits make large message restorations very slow
+- Only text channels support full message restoration
 
 ## Advanced Configuration
 

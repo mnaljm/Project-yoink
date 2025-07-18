@@ -110,9 +110,14 @@ def recreate(ctx, backup_path, server_id, dry_run, skip_media):
     async def run_recreation():
         client = DiscordYoinkClient(config)
         recreator = ServerRecreator(config)
+        start_task = None
         
         try:
-            await client.start()
+            # Start the client in the background
+            start_task = asyncio.create_task(client.start())
+            
+            # Wait for the client to be ready
+            await client.wait_until_ready()
             
             # Load backup data
             with open(backup_path, 'r', encoding='utf-8') as f:
@@ -144,6 +149,9 @@ def recreate(ctx, backup_path, server_id, dry_run, skip_media):
         except Exception as e:
             click.echo(f"Recreation failed: {e}", err=True)
         finally:
+            # Cancel the start task and close the client
+            if start_task:
+                start_task.cancel()
             await client.close()
     
     asyncio.run(run_recreation())

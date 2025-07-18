@@ -5,7 +5,8 @@ Recreates Discord servers from backup data
 
 import asyncio
 import logging
-from typing import Dict, Any, List, Optional
+import os
+from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
 import discord
 from discord.ext import commands
@@ -54,7 +55,7 @@ class ServerRecreator:
                 await self._recreate_stickers(backup_data.get('stickers', {}), target_guild)
             
             # Step 5: Restore messages (optional, can be very slow)
-            # await self._restore_messages(backup_data.get('channels', {}), target_guild)
+            await self._restore_messages(backup_data.get('channels', {}), target_guild)
             
             logger.info("Server recreation completed successfully")
             return self.stats
@@ -379,13 +380,19 @@ class ServerRecreator:
                 logger.error(f"Unexpected error creating sticker {sticker_data['name']}: {e}")
     
     async def _restore_messages(self, channels_data: Dict[str, Any], guild: discord.Guild) -> None:
-        """Restore messages to channels (limited functionality)"""
+        """Restore messages to channels with improved functionality"""
         logger.info("Restoring messages...")
         
-        # Note: Message restoration is limited because:
+        # Get configuration for message restoration
+        config = self.config
+        max_messages = config.get('restore_max_messages', 50)  # Default to 50 messages per channel
+        restore_media = config.get('restore_media', True)  # Default to restore media
+        
+        # Note: Message restoration limitations:
         # 1. Cannot restore messages with original timestamps
-        # 2. Cannot restore messages from other users
-        # 3. Rate limits make this very slow
+        # 2. Uses webhooks to approximate original authors
+        # 3. Rate limits make this slow for large channels
+        # 4. Cross-server forwarded messages may have limited content
         
         for old_channel_id, channel_data in channels_data.items():
             if old_channel_id not in self.channel_mapping:
@@ -394,29 +401,144 @@ class ServerRecreator:
             new_channel_id = self.channel_mapping[old_channel_id]
             channel = guild.get_channel(int(new_channel_id))
             
-            if not channel or not hasattr(channel, 'send'):
+            # Only restore messages to text-based channels
+            if not channel or not hasattr(channel, 'send') or channel.type not in [discord.ChannelType.text, discord.ChannelType.news]:
                 continue
             
             messages = channel_data.get('messages', [])
             
-            # Only restore a limited number of recent messages as webhooks
-            # This is a demonstration - full message restoration would require webhooks
-            # and significant additional complexity
+            if not messages:
+                logger.debug(f"No messages found for channel {channel.name}")
+                continue
             
-            for message in messages[-10:]:  # Last 10 messages only
+            logger.info(f"Restoring up to {max_messages} messages in #{channel.name}")
+            
+            # Create a webhook for this channel to send messages with original usernames/avatars
+            webhook = None
+            try:
+                # Only text channels support webhooks
+                if hasattr(channel, 'create_webhook') and channel.type == discord.ChannelType.text:
+                    webhook = await channel.create_webhook(name="Backup Restore", reason="Message restoration from backup")
+            except (discord.Forbidden, discord.HTTPException) as e:
+                logger.warning(f"Could not create webhook for #{channel.name}: {e}. Using bot messages instead.")
+            
+            # Restore messages (most recent first, but we'll reverse to maintain chronological order)
+            messages_to_restore = messages[-max_messages:] if len(messages) > max_messages else messages
+            
+            for i, message in enumerate(messages_to_restore):
                 try:
-                    content = message.get('content', '')
-                    if not content:
-                        continue
+                    # Cast channel to proper type for message restoration
+                    if isinstance(channel, (discord.TextChannel, discord.Thread)):
+                        await self._restore_single_message(message, channel, webhook, restore_media)
+                        self.stats['messages_restored'] += 1
                     
-                    # Create a simple message indicating this is from backup
-                    backup_content = f"**[BACKUP]** {message['author']['username']}: {content}"
-                    
-                    await channel.send(backup_content[:2000])  # Discord message limit
-                    self.stats['messages_restored'] += 1
-                    
-                    await asyncio.sleep(2)  # Heavy rate limiting for messages
+                    # Rate limiting - be more aggressive to avoid hitting limits
+                    if i % 5 == 0:  # Every 5 messages, longer pause
+                        await asyncio.sleep(3)
+                    else:
+                        await asyncio.sleep(1)
                     
                 except Exception as e:
-                    logger.error(f"Failed to restore message: {e}")
-                    break  # Stop on first error to avoid spam
+                    logger.error(f"Failed to restore message in #{channel.name}: {e}")
+                    # Continue with other messages instead of breaking
+                    continue
+            
+            # Clean up webhook
+            if webhook:
+                try:
+                    await webhook.delete(reason="Backup restoration complete")
+                except Exception as e:
+                    logger.warning(f"Could not delete webhook: {e}")
+            
+            logger.info(f"Completed message restoration for #{channel.name}")
+            await asyncio.sleep(2)  # Pause between channels
+    
+    async def _restore_single_message(self, message: Dict[str, Any], channel: Union[discord.TextChannel, discord.Thread], 
+                                    webhook: Optional[discord.Webhook], restore_media: bool) -> None:
+        """Restore a single message to a channel"""
+        username = "Unknown User"  # Default value
+        try:
+            content = message.get('content', '')
+            author = message.get('author', {})
+            username = author.get('username', 'Unknown User')
+            avatar_url = author.get('avatar_url')
+            attachments = message.get('attachments', [])
+            embeds = message.get('embeds', [])
+            timestamp = message.get('timestamp', '')
+            
+            # Handle forwarded messages
+            is_forwarded = message.get('reference') is not None
+            forwarded_note = ""
+            if is_forwarded:
+                ref = message.get('reference', {})
+                forwarded_note = f"*[Forwarded from #{ref.get('channel_name', 'unknown')}]*\n"
+            
+            # Handle cross-server forwarded messages with metadata
+            if message.get('is_cross_server_forward'):
+                cross_server_info = message.get('cross_server_metadata', {})
+                forwarded_note = f"*[Cross-server forward from {cross_server_info.get('guild_name', 'unknown server')}]*\n"
+                if not content and cross_server_info.get('note'):
+                    content = f"*{cross_server_info['note']}*"
+            
+            # Skip if no content and no attachments
+            if not content and not attachments and not embeds:
+                logger.debug(f"Skipping empty message from {username}")
+                return
+            
+            # Prepare content with timestamp info
+            if timestamp:
+                formatted_time = timestamp.replace('T', ' ').replace('Z', ' UTC')
+                footer_text = f"\n*Original time: {formatted_time}*"
+            else:
+                footer_text = "\n*Original time: Unknown*"
+            
+            # Combine content
+            full_content = forwarded_note + content + footer_text
+            
+            # Handle attachments/media if enabled
+            files_to_send = []
+            if restore_media and attachments:
+                for attachment in attachments[:5]:  # Limit to 5 files per message
+                    file_path = attachment.get('local_path')
+                    if file_path and os.path.exists(file_path):
+                        try:
+                            # Check file size (Discord limit is 25MB for bots)
+                            if os.path.getsize(file_path) <= 25 * 1024 * 1024:
+                                filename = attachment.get('filename', os.path.basename(file_path))
+                                files_to_send.append(discord.File(file_path, filename=filename))
+                            else:
+                                full_content += f"\n*[Attachment too large: {attachment.get('filename', 'unknown')}]*"
+                        except Exception as e:
+                            logger.warning(f"Could not attach file {file_path}: {e}")
+                            full_content += f"\n*[Attachment unavailable: {attachment.get('filename', 'unknown')}]*"
+                    else:
+                        # Add note about missing attachment
+                        full_content += f"\n*[Attachment not downloaded: {attachment.get('filename', 'unknown')}]*"
+            
+            # Truncate content if too long
+            if len(full_content) > 2000:
+                full_content = full_content[:1997] + "..."
+            
+            # Send the message
+            if webhook and isinstance(channel, discord.TextChannel):
+                # Use webhook for better representation
+                await webhook.send(
+                    content=full_content,
+                    username=username,
+                    avatar_url=avatar_url,
+                    files=files_to_send
+                )
+            else:
+                # Fallback to regular bot message
+                formatted_content = f"**{username}**: {full_content}"
+                if len(formatted_content) > 2000:
+                    formatted_content = formatted_content[:1997] + "..."
+                
+                if files_to_send:
+                    await channel.send(formatted_content, files=files_to_send)
+                else:
+                    await channel.send(formatted_content)
+            
+        except Exception as e:
+            logger.error(f"Error restoring message from {username}: {e}")
+            raise
