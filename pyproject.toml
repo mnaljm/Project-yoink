@@ -53,14 +53,15 @@ Repository = "https://github.com/mnaljm/Project-yoink.git"
 Issues = "https://github.com/mnaljm/Project-yoink/issues"
 
 [project.scripts]
-discord-yoink = "discord_yoink:main"
+discord-yoink = "discord_yoink:cli"
 
 [tool.setuptools]
-packages = ["src"]
-include-package-data = true
+py-modules = ["discord_yoink"]
 
-[tool.setuptools.package-dir]
-"" = "."
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+exclude = ["tests*"]
 
 [tool.black]
 line-length = 88
