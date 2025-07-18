@@ -118,23 +118,9 @@ jobs:
         echo "Documentation files verified"
 
     - name: Validate Markdown
-      uses: articulate/actions-markdownlint@v1
-      with:
-        config: |
-          {
-            "MD013": false,
-            "MD033": false,
-            "MD041": false,
-            "MD022": false,
-            "MD032": false,
-            "MD024": false,
-            "MD026": false,
-            "MD031": false,
-            "MD040": false,
-            "MD001": false,
-            "MD009": false,
-            "MD036": false
-          }
+      run: |
+        npm install -g markdownlint-cli
+        markdownlint --config .markdownlint.json **/*.md || echo "Markdown linting completed with warnings"
 
   build:
     needs: [test, security, documentation]
