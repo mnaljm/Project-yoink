@@ -18,6 +18,7 @@ from src.server_recreator import ServerRecreator
 from src.exporter import DataExporter
 from src.config import Config
 from src.utils import setup_logging, validate_permissions
+from src.backup_chain import BackupChain, choose_backup_chain_interactive
 
 __version__ = "1.1.1"
 
@@ -100,13 +101,19 @@ def choose_backup_file_interactive():
                     server_name = data.get("server_info", {}).get(
                         "name", "Unknown Server"
                     )
-                    backup_time = data.get("timestamp", mod_time.isoformat())
+                    backup_time = data.get("backup_info", {}).get(
+                        "timestamp"
+                    ) or data.get("timestamp", mod_time.isoformat())
+                    is_incremental = data.get("backup_info", {}).get(
+                        "incremental", False
+                    )
 
                     valid_backups.append(
                         {
                             "path": file_path,
                             "server_name": server_name,
                             "backup_time": backup_time,
+                            "is_incremental": is_incremental,
                             "file_size": file_size,
                             "mod_time": mod_time,
                             "stats": data.get("stats", {}),
@@ -130,7 +137,8 @@ def choose_backup_file_interactive():
 
     # Display backup files with numbers
     for i, backup in enumerate(valid_backups, 1):
-        click.echo(f"{i:2}. 💾 {backup['server_name']}")
+        backup_type = "🔄 INCREMENTAL" if backup["is_incremental"] else "📦 FULL"
+        click.echo(f"{i:2}. 💾 {backup['server_name']} ({backup_type})")
         click.echo(f"     File: {backup['path']}")
         click.echo(f"     Backup Date: {backup['backup_time'][:19]}")
         click.echo(f"     Size: {backup['file_size']:.1f} MB")
@@ -379,6 +387,17 @@ def backup(ctx, server_id, interactive, output, incremental, channels):
     is_flag=True,
     help="Reduce rate limiting delays (may hit Discord rate limits)",
 )
+@click.option(
+    "--auto-merge",
+    is_flag=True,
+    help="Automatically detect and merge backup chains for complete restoration",
+)
+@click.option(
+    "--backup-chains",
+    "-bc",
+    is_flag=True,
+    help="Interactive mode - choose from available backup chains",
+)
 @click.pass_context
 def recreate(
     ctx,
@@ -392,64 +411,73 @@ def recreate(
     ignore_emoji_limit,
     ignore_sticker_limit,
     fast_mode,
+    auto_merge,
+    backup_chains,
 ):
-    """Recreate a Discord server from backup"""
+    """Recreate a Discord server from backup (supports automatic backup chain merging)"""
     config = ctx.obj["config"]
 
     # Validate input combinations
-    if interactive:
+    if interactive or backup_chains:
         if backup_path or server_id:
             click.echo(
-                "Error: Cannot use --backup-path or --server-id with --interactive",
+                "Error: Cannot use --backup-path or --server-id with --interactive or --backup-chains",
                 err=True,
             )
             return
     else:
         if not backup_path:
             click.echo(
-                "Error: Must specify --backup-path or use --interactive mode", err=True
+                "Error: Must specify --backup-path, use --interactive, or use --backup-chains mode",
+                err=True,
             )
             return
         if not server_id:
             click.echo(
-                "Error: Must specify --server-id or use --interactive mode", err=True
+                "Error: Must specify --server-id, use --interactive, or use --backup-chains mode",
+                err=True,
             )
             return
 
     async def run_recreation():
         # Apply bypass options to config
-        modified_config = config.copy()
+        # Create a temporary settings dict for modifications
+        temp_settings = {}
 
         if no_limits:
             # Enable all bypass options when --no-limits is used
-            modified_config.settings["restore_max_messages"] = 0  # 0 = unlimited
-            modified_config.settings["ignore_emoji_limit"] = True
-            modified_config.settings["ignore_sticker_limit"] = True
-            modified_config.settings["rate_limit_delay"] = 0.1  # Fast mode
+            temp_settings["restore_max_messages"] = 0  # 0 = unlimited
+            temp_settings["ignore_emoji_limit"] = True
+            temp_settings["ignore_sticker_limit"] = True
+            temp_settings["rate_limit_delay"] = 0.1  # Fast mode
             click.echo("🚀 No limits mode enabled - bypassing all Discord limits")
         else:
             # Apply individual bypass options
             if max_messages is not None:
-                modified_config.settings["restore_max_messages"] = max_messages
+                temp_settings["restore_max_messages"] = max_messages
                 if max_messages == 0:
                     click.echo("📝 Unlimited message restoration enabled")
                 else:
                     click.echo(f"📝 Message limit set to {max_messages} per channel")
 
             if ignore_emoji_limit:
-                modified_config.settings["ignore_emoji_limit"] = True
+                temp_settings["ignore_emoji_limit"] = True
                 click.echo("😀 Emoji limit bypass enabled")
 
             if ignore_sticker_limit:
-                modified_config.settings["ignore_sticker_limit"] = True
+                temp_settings["ignore_sticker_limit"] = True
                 click.echo("🎯 Sticker limit bypass enabled")
 
             if fast_mode:
-                modified_config.settings["rate_limit_delay"] = 0.1
+                temp_settings["rate_limit_delay"] = 0.1
                 click.echo("⚡ Fast mode enabled - reduced rate limiting")
 
-        client = DiscordYoinkClient(modified_config)
-        recreator = ServerRecreator(modified_config)
+        # Apply temporary settings to config
+        for key, value in temp_settings.items():
+            config.set(key, value)
+
+        client = DiscordYoinkClient(config)
+        recreator = ServerRecreator(config)
         start_task = None
 
         try:
@@ -484,12 +512,10 @@ def recreate(
 
                     if use_no_limits:
                         # Apply no-limits settings dynamically
-                        modified_config.settings["restore_max_messages"] = (
-                            0  # Unlimited
-                        )
-                        modified_config.settings["ignore_emoji_limit"] = True
-                        modified_config.settings["ignore_sticker_limit"] = True
-                        modified_config.settings["rate_limit_delay"] = 0.1  # Fast mode
+                        config.set("restore_max_messages", 0)  # Unlimited
+                        config.set("ignore_emoji_limit", True)
+                        config.set("ignore_sticker_limit", True)
+                        config.set("rate_limit_delay", 0.1)  # Fast mode
                         click.echo(
                             "🚀 No limits mode enabled - bypassing all Discord limits"
                         )
@@ -500,15 +526,15 @@ def recreate(
                             default=False,
                         )
                         if restore_all_messages:
-                            modified_config.settings["restore_max_messages"] = 0
+                            config.set("restore_max_messages", 0)
                             click.echo("📝 Unlimited message restoration enabled")
 
                         ignore_limits = click.confirm(
                             "🚫 Ignore Discord emoji/sticker limits?", default=False
                         )
                         if ignore_limits:
-                            modified_config.settings["ignore_emoji_limit"] = True
-                            modified_config.settings["ignore_sticker_limit"] = True
+                            config.set("ignore_emoji_limit", True)
+                            config.set("ignore_sticker_limit", True)
                             click.echo("🚫 Emoji and sticker limit bypass enabled")
 
                         use_fast_mode = click.confirm(
@@ -516,21 +542,44 @@ def recreate(
                             default=False,
                         )
                         if use_fast_mode:
-                            modified_config.settings["rate_limit_delay"] = 0.1
+                            config.set("rate_limit_delay", 0.1)
                             click.echo("⚡ Fast mode enabled - reduced rate limiting")
 
                 # Recreate the client and recreator with updated config
                 await client.close()
-                client = DiscordYoinkClient(modified_config)
-                recreator = ServerRecreator(modified_config)
+                client = DiscordYoinkClient(config)
+                recreator = ServerRecreator(config)
 
                 # Restart the client task
                 if start_task:
                     start_task.cancel()
                 start_task = asyncio.create_task(client.start())
                 await client.wait_until_ready()
+            elif backup_chains:
+                # Backup chain mode - let user choose from available chains
+                backup_path_chosen = choose_backup_chain_interactive("./backups")
+                if not backup_path_chosen:
+                    click.echo("No backup chain selected. Exiting.")
+                    return
             else:
                 backup_path_chosen = backup_path
+
+                # Auto-merge backup chains if requested
+                if auto_merge:
+                    click.echo("🔗 Checking for backup chains...")
+                    chain_manager = BackupChain("./backups")
+                    merge_result = chain_manager.auto_merge_for_backup(
+                        backup_path_chosen
+                    )
+
+                    if merge_result:
+                        merged_data, merged_path = merge_result
+                        click.echo(f"✅ Auto-merged backup chain: {merged_path}")
+                        backup_path_chosen = merged_path
+                    else:
+                        click.echo(
+                            "ℹ️  No backup chain found or backup is already complete"
+                        )
 
             # Load backup data to show what we're recreating
             try:
@@ -549,16 +598,36 @@ def recreate(
             original_server_name = backup_data.get("server_info", {}).get(
                 "name", "Unknown"
             )
-            backup_timestamp = backup_data.get("timestamp", "Unknown")
+            backup_timestamp = backup_data.get("backup_info", {}).get(
+                "timestamp"
+            ) or backup_data.get("timestamp", "Unknown")
+            is_incremental = backup_data.get("backup_info", {}).get(
+                "incremental", False
+            )
+            backup_type = "INCREMENTAL" if is_incremental else "FULL"
             stats = backup_data.get("stats", {})
 
             click.echo(f"\n📁 Backup Info:")
             click.echo(f"   File: {backup_path_chosen}")
             click.echo(f"   Original Server: {original_server_name}")
+            click.echo(f"   Backup Type: {backup_type}")
             click.echo(f"   Backup Date: {backup_timestamp}")
             click.echo(f"   Messages: {stats.get('total_messages', 0):,}")
             click.echo(f"   Channels: {stats.get('total_channels', 0)}")
             click.echo(f"   Media Files: {stats.get('media_files', 0)}")
+
+            # Add warning for incremental backups
+            if is_incremental:
+                click.echo(f"   ⚠️  WARNING: This is an incremental backup!")
+                click.echo(
+                    f"   ⚠️  It contains only NEW messages since the last backup."
+                )
+                click.echo(
+                    f"   ⚠️  The server will be restored with ONLY the incremental data."
+                )
+                click.echo(
+                    f"   ⚠️  You may want to use a FULL backup for complete restoration."
+                )
 
             # Interactive mode - let user choose target server
             if interactive:
@@ -799,6 +868,84 @@ def list_guilds(ctx):
             await client.close()
 
     asyncio.run(run_list_guilds())
+
+
+@cli.command()
+@click.option(
+    "--backup-dir", "-d", default="./backups", help="Backup directory to scan"
+)
+@click.option("--merge-all", is_flag=True, help="Merge all discovered backup chains")
+@click.option("--output-dir", "-o", help="Output directory for merged backups")
+@click.pass_context
+def chains(ctx, backup_dir, merge_all, output_dir):
+    """Manage backup chains - view, merge, and organize backup sequences"""
+
+    try:
+        chain_manager = BackupChain(backup_dir)
+        chains = chain_manager.get_chains()
+
+        if not chains:
+            click.echo("❌ No backup chains found")
+            return
+
+        click.echo(f"🔗 Found {len(chains)} backup chain(s):")
+        click.echo("=" * 80)
+
+        for i, (chain_name, chain) in enumerate(chains.items(), 1):
+            chain_info = chain_manager.get_chain_info(chain)
+
+            click.echo(f"{i}. 🔗 {chain_info['server_name']}")
+            click.echo(
+                f"   📦 Full backup: {chain_info['full_backup']['timestamp'][:19]}"
+            )
+            click.echo(f"      Path: {chain_info['full_backup']['path']}")
+            click.echo(f"      Messages: {chain_info['full_backup']['messages']:,}")
+
+            if chain_info["incremental_backups"]:
+                click.echo(
+                    f"   🔄 Incremental backups: {len(chain_info['incremental_backups'])}"
+                )
+                for j, inc_backup in enumerate(chain_info["incremental_backups"], 1):
+                    click.echo(
+                        f"      {j}. {inc_backup['timestamp'][:19]} - {inc_backup['messages']:,} messages"
+                    )
+
+            click.echo(f"   📊 Total messages: {chain_info['total_messages']:,}")
+            click.echo(f"   📂 Total media files: {chain_info['total_media_files']:,}")
+            click.echo(
+                f"   📅 Date range: {chain_info['date_range']['start'][:10]} to {chain_info['date_range']['end'][:10]}"
+            )
+            click.echo("-" * 60)
+
+        if merge_all:
+            click.echo(f"\n🔄 Merging all {len(chains)} backup chains...")
+
+            merged_count = 0
+            for chain_name, chain in chains.items():
+                try:
+                    if len(chain) > 1:  # Only merge if there are incremental backups
+                        merged_data = chain_manager.merge_chain(chain)
+
+                        if output_dir:
+                            backup_name = merged_data["backup_info"]["backup_name"]
+                            output_path = f"{output_dir}/{backup_name}.json"
+                        else:
+                            output_path = None
+
+                        saved_path = chain_manager.save_merged_backup(
+                            merged_data, output_path
+                        )
+                        click.echo(f"✅ Merged chain: {chain_name} -> {saved_path}")
+                        merged_count += 1
+                    else:
+                        click.echo(f"⏭️  Skipped (no incremental backups): {chain_name}")
+                except Exception as e:
+                    click.echo(f"❌ Failed to merge {chain_name}: {e}")
+
+            click.echo(f"\n🎉 Merged {merged_count} backup chains successfully!")
+
+    except Exception as e:
+        click.echo(f"Failed to manage backup chains: {e}", err=True)
 
 
 if __name__ == "__main__":
