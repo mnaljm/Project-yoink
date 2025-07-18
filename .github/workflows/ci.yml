@@ -161,6 +161,16 @@ jobs:
         name: dist
         path: dist/
 
+    - name: Upload release assets
+      uses: softprops/action-gh-release@v1
+      if: github.event_name == 'release'
+      with:
+        files: |
+          dist/*.whl
+          dist/*.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   release-check:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
