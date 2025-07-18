@@ -583,16 +583,90 @@ def recreate(
 
             if dry_run:
                 click.echo("🔍 DRY RUN MODE - No changes will be made")
-                await recreator.preview_recreation(backup_data, server)
+                preview = await recreator.preview_recreation(backup_data, server)
+
+                click.echo(f"\n📋 Preview of changes:")
+
+                # Show what would be removed
+                if preview["channels_to_remove"]:
+                    click.echo(
+                        f"🗑️  Channels to remove ({len(preview['channels_to_remove'])}):"
+                    )
+                    for channel in preview["channels_to_remove"][:10]:  # Show first 10
+                        click.echo(f"  - {channel}")
+                    if len(preview["channels_to_remove"]) > 10:
+                        click.echo(
+                            f"  ... and {len(preview['channels_to_remove']) - 10} more"
+                        )
+
+                if preview["roles_to_remove"]:
+                    click.echo(
+                        f"🗑️  Roles to remove ({len(preview['roles_to_remove'])}):"
+                    )
+                    for role in preview["roles_to_remove"][:10]:  # Show first 10
+                        click.echo(f"  - {role}")
+                    if len(preview["roles_to_remove"]) > 10:
+                        click.echo(
+                            f"  ... and {len(preview['roles_to_remove']) - 10} more"
+                        )
+
+                # Show what would be created
+                if preview["channels_to_create"]:
+                    click.echo(
+                        f"➕ Channels to create ({len(preview['channels_to_create'])}):"
+                    )
+                    for channel in preview["channels_to_create"][:10]:  # Show first 10
+                        click.echo(f"  - {channel}")
+                    if len(preview["channels_to_create"]) > 10:
+                        click.echo(
+                            f"  ... and {len(preview['channels_to_create']) - 10} more"
+                        )
+
+                if preview["roles_to_create"]:
+                    click.echo(
+                        f"➕ Roles to create ({len(preview['roles_to_create'])}):"
+                    )
+                    for role in preview["roles_to_create"][:10]:  # Show first 10
+                        click.echo(f"  - {role}")
+                    if len(preview["roles_to_create"]) > 10:
+                        click.echo(
+                            f"  ... and {len(preview['roles_to_create']) - 10} more"
+                        )
+
+                # Show server name change
+                server_info = preview["server_info"]
+                if server_info.get("name") and server_info["name"] != server.name:
+                    click.echo(
+                        f"📝 Server would be renamed from '{server.name}' to '{server_info['name']}'"
+                    )
+
+                if preview["warnings"]:
+                    click.echo(f"⚠️  Warnings ({len(preview['warnings'])}):")
+                    for warning in preview["warnings"][:5]:  # Show first 5
+                        click.echo(f"  - {warning}")
+                    if len(preview["warnings"]) > 5:
+                        click.echo(f"  ... and {len(preview['warnings']) - 5} more")
             else:
                 result = await recreator.recreate_server(
                     backup_data, server, skip_media=skip_media
                 )
 
                 click.echo(f"\n✅ Recreation completed!")
+                click.echo(f"Channels removed: {result['channels_removed']}")
+                click.echo(f"Roles removed: {result['roles_removed']}")
                 click.echo(f"Channels created: {result['channels_created']}")
                 click.echo(f"Roles created: {result['roles_created']}")
+                click.echo(
+                    f"Server renamed: {'Yes' if result['server_renamed'] else 'No'}"
+                )
                 click.echo(f"Messages restored: {result['messages_restored']}")
+
+                if result["errors"]:
+                    click.echo(f"⚠️  Errors encountered: {len(result['errors'])}")
+                    for error in result["errors"][:5]:  # Show first 5 errors
+                        click.echo(f"  - {error}")
+                    if len(result["errors"]) > 5:
+                        click.echo(f"  ... and {len(result['errors']) - 5} more errors")
 
         except Exception as e:
             click.echo(f"Recreation failed: {e}", err=True)

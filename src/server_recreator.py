@@ -25,8 +25,11 @@ class ServerRecreator:
         self.channel_mapping: Dict[str, str] = {}  # old_id -> new_id
         self.stats = {
             "channels_created": 0,
+            "channels_removed": 0,
             "roles_created": 0,
+            "roles_removed": 0,
             "messages_restored": 0,
+            "server_renamed": False,
             "errors": [],
         }
 
@@ -45,25 +48,28 @@ class ServerRecreator:
         logger.info(f"Starting server recreation for: {target_guild.name}")
 
         try:
-            # Step 1: Create roles
+            # Step 1: Clean up existing server to match backup
+            await self._cleanup_server(backup_data, target_guild)
+
+            # Step 2: Create roles
             await self._recreate_roles(backup_data.get("roles", {}), target_guild)
 
-            # Step 2: Create channels and categories
+            # Step 3: Create channels and categories
             await self._recreate_channels(backup_data.get("channels", {}), target_guild)
 
-            # Step 3: Set server settings
+            # Step 4: Set server settings (including renaming)
             await self._apply_server_settings(
                 backup_data.get("server_info", {}), target_guild
             )
 
-            # Step 4: Upload emojis
+            # Step 5: Upload emojis
             if not skip_media:
                 await self._recreate_emojis(backup_data.get("emojis", {}), target_guild)
                 await self._recreate_stickers(
                     backup_data.get("stickers", {}), target_guild
                 )
 
-            # Step 5: Restore messages (optional, can be very slow)
+            # Step 6: Restore messages (optional, can be very slow)
             await self._restore_messages(backup_data.get("channels", {}), target_guild)
 
             logger.info("Server recreation completed successfully")
@@ -82,25 +88,54 @@ class ServerRecreator:
             "server_info": backup_data.get("server_info", {}),
             "roles_to_create": [],
             "channels_to_create": [],
+            "roles_to_remove": [],
+            "channels_to_remove": [],
             "emojis_to_upload": [],
             "stickers_to_upload": [],
             "warnings": [],
         }
 
-        # Analyze roles
-        existing_roles = {role.name: role for role in target_guild.roles}
-        for role_id, role_data in backup_data.get("roles", {}).items():
+        # Get backup data
+        backup_channels = backup_data.get("channels", {})
+        backup_roles = backup_data.get("roles", {})
+
+        # Create sets of names that should exist
+        backup_channel_names = {
+            channel_data.get("name", "").lower()
+            for channel_data in backup_channels.values()
+            if channel_data.get("name")
+        }
+        backup_role_names = {
+            role_data.get("name", "").lower()
+            for role_data in backup_roles.values()
+            if role_data.get("name")
+        }
+
+        # Analyze what would be removed
+        for channel in target_guild.channels:
+            if channel.name.lower() not in backup_channel_names:
+                preview["channels_to_remove"].append(channel.name)
+
+        for role in target_guild.roles:
+            if role.name != "@everyone" and role.name.lower() not in backup_role_names:
+                preview["roles_to_remove"].append(role.name)
+
+        # Analyze roles to create
+        existing_roles = {role.name.lower(): role for role in target_guild.roles}
+        for role_id, role_data in backup_roles.items():
             role_name = role_data.get("name", "Unknown")
-            if role_name in existing_roles:
+            if role_name.lower() in existing_roles:
                 preview["warnings"].append(f"Role '{role_name}' already exists")
             else:
                 preview["roles_to_create"].append(role_name)
 
-        # Analyze channels
-        existing_channels = {channel.name: channel for channel in target_guild.channels}
-        for channel_id, channel_data in backup_data.get("channels", {}).items():
+        # Analyze channels to create
+        existing_channels = {
+            channel.name.lower(): channel for channel in target_guild.channels
+        }
+        for channel_id, channel_data in backup_channels.items():
             channel_name = channel_data.get("name", "Unknown")
-            if channel_name in existing_channels:
+            if channel_name.lower() in existing_channels:
                 preview["warnings"].append(f"Channel '{channel_name}' already exists")
             else:
                 preview["channels_to_create"].append(channel_name)
@@ -115,6 +150,68 @@ class ServerRecreator:
                 preview["emojis_to_upload"].append(emoji_name)
 
         return preview
+
+    async def _cleanup_server(
+        self, backup_data: Dict[str, Any], guild: discord.Guild
+    ) -> None:
+        """Clean up existing server to match backup structure"""
+        logger.info("Cleaning up server to match backup...")
+
+        # Get channels and roles from backup
+        backup_channels = backup_data.get("channels", {})
+        backup_roles = backup_data.get("roles", {})
+
+        # Create sets of names that should exist
+        backup_channel_names = {
+            channel_data.get("name", "").lower()
+            for channel_data in backup_channels.values()
+            if channel_data.get("name")
+        }
+        backup_role_names = {
+            role_data.get("name", "").lower()
+            for role_data in backup_roles.values()
+            if role_data.get("name")
+        }
+
+        # Remove channels that don't exist in backup
+        for channel in guild.channels:
+            if channel.name.lower() not in backup_channel_names:
+                try:
+                    await channel.delete(reason="Removing channel not in backup")
+                    logger.info(f"Removed channel: {channel.name}")
+                    self.stats["channels_removed"] += 1
+                    await asyncio.sleep(self._get_rate_limit_delay())
+                except discord.Forbidden:
+                    logger.warning(f"No permission to delete channel: {channel.name}")
+                    self.stats["errors"].append(
+                        f"No permission to delete channel: {channel.name}"
+                    )
+                except discord.HTTPException as e:
+                    logger.error(f"Failed to delete channel {channel.name}: {e}")
+                    self.stats["errors"].append(
+                        f"Failed to delete channel {channel.name}: {e}"
+                    )
+
+        # Remove roles that don't exist in backup (except @everyone)
+        for role in guild.roles:
+            if role.name != "@everyone" and role.name.lower() not in backup_role_names:
+                try:
+                    await role.delete(reason="Removing role not in backup")
+                    logger.info(f"Removed role: {role.name}")
+                    self.stats["roles_removed"] += 1
+                    await asyncio.sleep(self._get_rate_limit_delay())
+                except discord.Forbidden:
+                    logger.warning(f"No permission to delete role: {role.name}")
+                    self.stats["errors"].append(
+                        f"No permission to delete role: {role.name}"
+                    )
+                except discord.HTTPException as e:
+                    logger.error(f"Failed to delete role {role.name}: {e}")
+                    self.stats["errors"].append(
+                        f"Failed to delete role {role.name}: {e}"
+                    )
+
+        logger.info("Server cleanup completed")
 
     async def _recreate_roles(
         self, roles_data: Dict[str, Any], guild: discord.Guild
@@ -234,7 +331,9 @@ class ServerRecreator:
                     and channel_data["category_id"] in self.channel_mapping
                 ):
                     new_category_id = self.channel_mapping[channel_data["category_id"]]
-                    category = guild.get_channel(int(new_category_id))
+                    category_channel = guild.get_channel(int(new_category_id))
+                    if isinstance(category_channel, discord.CategoryChannel):
+                        category = category_channel
 
                 # Create channel based on type
                 channel_type = channel_data.get("type", "text")
@@ -254,7 +353,8 @@ class ServerRecreator:
                     new_channel = await guild.create_voice_channel(
                         name=channel_data["name"],
                         bitrate=min(
-                            channel_data.get("bitrate", 64000), guild.bitrate_limit
+                            int(channel_data.get("bitrate", 64000)),
+                            int(guild.bitrate_limit),
                         ),
                         user_limit=channel_data.get("user_limit", 0),
                         category=category,
@@ -263,14 +363,27 @@ class ServerRecreator:
                     )
 
                 elif channel_type == "forum":
-                    # Forum channels require special handling
-                    new_channel = await guild.create_forum_channel(
-                        name=channel_data["name"],
-                        topic=channel_data.get("topic"),
-                        category=category,
-                        position=channel_data.get("position", 0),
-                        reason="Server recreation from backup",
-                    )
+                    # Forum channels (newer Discord feature)
+                    try:
+                        new_channel = await guild.create_forum(
+                            name=channel_data["name"],
+                            topic=channel_data.get("topic"),
+                            category=category,
+                            position=channel_data.get("position", 0),
+                            reason="Server recreation from backup",
+                        )
+                    except AttributeError:
+                        # Fallback to text channel if forum not supported
+                        logger.warning(
+                            f"Forum channels not supported, creating text channel: {channel_data['name']}"
+                        )
+                        new_channel = await guild.create_text_channel(
+                            name=channel_data["name"],
+                            topic=channel_data.get("topic"),
+                            category=category,
+                            position=channel_data.get("position", 0),
+                            reason="Server recreation from backup",
+                        )
 
                 else:
                     logger.warning(f"Unsupported channel type: {channel_type}")
@@ -295,6 +408,12 @@ class ServerRecreator:
         logger.info("Applying server settings...")
 
         try:
+            # Update server name
+            if server_info.get("name") and server_info["name"] != guild.name:
+                await guild.edit(name=server_info["name"])
+                logger.info(f"Updated server name to: {server_info['name']}")
+                self.stats["server_renamed"] = True
+
             # Update server icon
             if (
                 server_info.get("local_icon_path")
