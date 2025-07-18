@@ -10,7 +10,7 @@ import aiofiles
 import discord
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta, timedelta
 import logging
 from tqdm.asyncio import tqdm
 
@@ -74,7 +74,7 @@ class BackupManager:
         # Initialize backup data structure
         backup_data = {
             "backup_info": {
-                "version": "1.0.0",
+                "version": "1.1.1",
                 "timestamp": self.stats["start_time"].isoformat(),
                 "incremental": incremental,
                 "backup_name": backup_name,
@@ -363,6 +363,23 @@ class BackupManager:
         messages = []
 
         try:
+            # For incremental backups, find the last backup timestamp
+            last_backup_time = None
+            if incremental:
+                last_backup_time = await self._find_last_backup_timestamp(
+                    str(channel.guild.id), str(channel.id)
+                )
+                if last_backup_time:
+                    logger.info(
+                        f"Incremental backup for #{channel.name}: "
+                        f"backing up messages since {last_backup_time}"
+                    )
+                else:
+                    logger.info(
+                        f"No previous backup found for #{channel.name}, "
+                        f"performing full backup"
+                    )
+
             # Determine message limit
             limit = None
             if self.config.max_messages_per_channel > 0:
@@ -377,6 +394,12 @@ class BackupManager:
                 try:
                     # Apply user filter
                     if str(message.author.id) in self.config.exclude_users:
+                        continue
+
+                    # Apply incremental backup filter
+                    if not self._should_backup_message(
+                        message, last_backup_time, incremental
+                    ):
                         continue
 
                     # Apply date filter
@@ -499,3 +522,79 @@ class BackupManager:
                 self.stats["end_time"].isoformat() if self.stats["end_time"] else None
             ),
         }
+
+    async def _find_last_backup_timestamp(
+        self, guild_id: str, channel_id: Optional[str] = None
+    ) -> Optional[datetime]:
+        """Find the timestamp of the most recent backup for incremental updates"""
+        try:
+            backup_dirs = []
+
+            # Search for backup directories
+            for item in self.output_dir.iterdir():
+                if item.is_dir():
+                    backup_json = item / "backup.json"
+                    if backup_json.exists():
+                        try:
+                            # Read the backup file to check guild ID
+                            async with aiofiles.open(
+                                backup_json, "r", encoding="utf-8"
+                            ) as f:
+                                content = await f.read()
+                                backup_data = json.loads(content)
+
+                            # Check if this backup is for the same guild
+                            backup_guild_id = backup_data.get("server_info", {}).get(
+                                "id"
+                            )
+                            if backup_guild_id == guild_id:
+                                backup_dirs.append((item, backup_json, backup_data))
+                        except (json.JSONDecodeError, FileNotFoundError):
+                            continue
+
+            if not backup_dirs:
+                logger.debug(f"No previous backups found for guild {guild_id}")
+                return None
+
+            # Sort by backup timestamp, get the most recent
+            backup_dirs.sort(
+                key=lambda x: x[2].get("backup_info", {}).get("timestamp", ""),
+                reverse=True,
+            )
+            latest_backup_data = backup_dirs[0][2]
+
+            # Get the timestamp from backup info
+            backup_timestamp = latest_backup_data.get("backup_info", {}).get(
+                "timestamp"
+            )
+            if backup_timestamp:
+                # Parse ISO format timestamp
+                last_backup_time = datetime.fromisoformat(
+                    backup_timestamp.replace("Z", "+00:00")
+                )
+                logger.info(f"Found last backup timestamp: {last_backup_time}")
+                return last_backup_time
+
+            # Fallback: get timestamp from file modification time
+            latest_backup_file = backup_dirs[0][1]
+            file_mtime = datetime.fromtimestamp(
+                latest_backup_file.stat().st_mtime, tz=timezone.utc
+            )
+            logger.info(f"Using file modification time as fallback: {file_mtime}")
+            return file_mtime
+
+        except Exception as e:
+            logger.warning(f"Failed to find last backup timestamp: {e}")
+            return None
+
+    def _should_backup_message(
+        self, message, last_backup_time: Optional[datetime], incremental: bool
+    ) -> bool:
+        """Determine if a message should be backed up based on incremental settings"""
+        if not incremental or last_backup_time is None:
+            return True
+
+        # For incremental backups, only backup messages newer than last backup
+        # Add a small buffer (1 minute) to ensure we don't miss messages due to timing
+        buffer_time = last_backup_time - timedelta(minutes=1)
+        return message.created_at > buffer_time

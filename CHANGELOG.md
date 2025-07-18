@@ -5,6 +5,26 @@ All notable changes to Discord Yoink will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2025-07-18
+
+### Added
+- **🔄 Incremental Backup Implementation**: Complete incremental backup functionality
+  - Fully implemented incremental backup logic for `--incremental` flag
+  - Automatic detection of previous backup timestamps
+  - Smart message filtering to only backup new content since last backup
+  - Fallback to full backup when no previous backup is found
+  - 1-minute buffer time to ensure no messages are missed during incremental updates
+
+### Fixed
+- Incremental backup feature now fully functional (previously only flagged but not implemented)
+- Improved backup timestamp detection and message filtering logic
+
+### Technical
+- Added `_find_last_backup_timestamp()` method for backup history detection
+- Added `_should_backup_message()` method for incremental filtering logic
+- Enhanced logging for incremental backup operations
+- Code formatting updated to black standards
+
 ## [1.1.0] - 2025-07-18
 
 ### Added

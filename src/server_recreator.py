@@ -349,7 +349,9 @@ class ServerRecreator:
                     logger.warning("Emoji limit reached, skipping remaining emojis")
                     break
                 elif ignore_emoji_limit and len(guild.emojis) >= guild.emoji_limit:
-                    logger.info(f"Emoji limit bypass: continuing despite {len(guild.emojis)}/{guild.emoji_limit} emojis")
+                    logger.info(
+                        f"Emoji limit bypass: continuing despite {len(guild.emojis)}/{guild.emoji_limit} emojis"
+                    )
 
                 # Load emoji file
                 emoji_path = emoji_data.get("local_path")
@@ -396,11 +398,18 @@ class ServerRecreator:
 
                 # Check sticker limits (unless bypassed)
                 ignore_sticker_limit = self.config.get("ignore_sticker_limit", False)
-                if not ignore_sticker_limit and len(guild.stickers) >= guild.sticker_limit:
+                if (
+                    not ignore_sticker_limit
+                    and len(guild.stickers) >= guild.sticker_limit
+                ):
                     logger.warning("Sticker limit reached, skipping remaining stickers")
                     break
-                elif ignore_sticker_limit and len(guild.stickers) >= guild.sticker_limit:
-                    logger.info(f"Sticker limit bypass: continuing despite {len(guild.stickers)}/{guild.sticker_limit} stickers")
+                elif (
+                    ignore_sticker_limit and len(guild.stickers) >= guild.sticker_limit
+                ):
+                    logger.info(
+                        f"Sticker limit bypass: continuing despite {len(guild.stickers)}/{guild.sticker_limit} stickers"
+                    )
 
                 # Load sticker file
                 sticker_path = sticker_data.get("local_path")
@@ -443,12 +452,12 @@ class ServerRecreator:
         max_messages = config.get(
             "restore_max_messages", 50
         )  # Default to 50 messages per channel
-        
+
         # Handle unlimited messages (0 = unlimited)
         unlimited_messages = max_messages == 0
         if unlimited_messages:
             logger.info("📝 Unlimited message restoration mode enabled")
-        
+
         restore_media = config.get("restore_media", True)  # Default to restore media
 
         # Note: Message restoration limitations:
@@ -480,12 +489,18 @@ class ServerRecreator:
                 continue
 
             if unlimited_messages:
-                logger.info(f"Restoring ALL {len(messages)} messages in #{channel.name}")
+                logger.info(
+                    f"Restoring ALL {len(messages)} messages in #{channel.name}"
+                )
                 messages_to_restore = messages
             else:
-                logger.info(f"Restoring up to {max_messages} messages in #{channel.name}")
+                logger.info(
+                    f"Restoring up to {max_messages} messages in #{channel.name}"
+                )
                 messages_to_restore = (
-                    messages[-max_messages:] if len(messages) > max_messages else messages
+                    messages[-max_messages:]
+                    if len(messages) > max_messages
+                    else messages
                 )
 
             # Create a webhook for this channel to send messages with original usernames/avatars
@@ -532,7 +547,9 @@ class ServerRecreator:
                     logger.warning(f"Could not delete webhook: {e}")
 
             logger.info(f"Completed message restoration for #{channel.name}")
-            await asyncio.sleep(self._get_rate_limit_delay(2.0))  # Pause between channels
+            await asyncio.sleep(
+                self._get_rate_limit_delay(2.0)
+            )  # Pause between channels
 
     async def _restore_single_message(
         self,

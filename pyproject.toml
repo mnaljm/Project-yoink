@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "discord-yoink"
-version = "1.1.0"
+version = "1.1.1"
 description = "Complete Discord server backup and recreation tool"
 readme = "README.md"
 license = {text = "MIT"}

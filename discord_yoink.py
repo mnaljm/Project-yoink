@@ -19,7 +19,7 @@ from src.exporter import DataExporter
 from src.config import Config
 from src.utils import setup_logging, validate_permissions
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 
 async def choose_server_interactive(client):
@@ -72,91 +72,99 @@ def choose_backup_file_interactive():
     import glob
     import os
     from datetime import datetime
-    
+
     # Search for backup files in common locations
     backup_patterns = [
         "./backups/**/*.json",
-        "./backups/*.json", 
+        "./backups/*.json",
         "./**/*backup*.json",
-        "./*.json"
+        "./*.json",
     ]
-    
+
     backup_files = []
     for pattern in backup_patterns:
         backup_files.extend(glob.glob(pattern, recursive=True))
-    
+
     # Filter and validate backup files
     valid_backups = []
     for file_path in set(backup_files):  # Remove duplicates
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 # Check if it looks like a Discord Yoink backup
-                if 'server_info' in data or 'channels' in data:
+                if "server_info" in data or "channels" in data:
                     file_stat = os.stat(file_path)
                     file_size = file_stat.st_size / (1024 * 1024)  # MB
                     mod_time = datetime.fromtimestamp(file_stat.st_mtime)
-                    
-                    server_name = data.get('server_info', {}).get('name', 'Unknown Server')
-                    backup_time = data.get('timestamp', mod_time.isoformat())
-                    
-                    valid_backups.append({
-                        'path': file_path,
-                        'server_name': server_name,
-                        'backup_time': backup_time,
-                        'file_size': file_size,
-                        'mod_time': mod_time,
-                        'stats': data.get('stats', {})
-                    })
+
+                    server_name = data.get("server_info", {}).get(
+                        "name", "Unknown Server"
+                    )
+                    backup_time = data.get("timestamp", mod_time.isoformat())
+
+                    valid_backups.append(
+                        {
+                            "path": file_path,
+                            "server_name": server_name,
+                            "backup_time": backup_time,
+                            "file_size": file_size,
+                            "mod_time": mod_time,
+                            "stats": data.get("stats", {}),
+                        }
+                    )
         except (json.JSONDecodeError, FileNotFoundError, PermissionError):
             continue
-    
+
     if not valid_backups:
         click.echo("❌ No valid backup files found in current directory or ./backups/")
         click.echo("   Search locations:")
         for pattern in backup_patterns:
             click.echo(f"   - {pattern}")
         return None
-    
+
     # Sort by modification time (newest first)
-    valid_backups.sort(key=lambda x: x['mod_time'], reverse=True)
-    
+    valid_backups.sort(key=lambda x: x["mod_time"], reverse=True)
+
     click.echo(f"\n📁 Found {len(valid_backups)} backup file(s):")
     click.echo("=" * 80)
-    
+
     # Display backup files with numbers
     for i, backup in enumerate(valid_backups, 1):
         click.echo(f"{i:2}. 💾 {backup['server_name']}")
         click.echo(f"     File: {backup['path']}")
         click.echo(f"     Backup Date: {backup['backup_time'][:19]}")
         click.echo(f"     Size: {backup['file_size']:.1f} MB")
-        
-        stats = backup['stats']
+
+        stats = backup["stats"]
         if stats:
-            click.echo(f"     Messages: {stats.get('total_messages', 0):,} | "
-                      f"Channels: {stats.get('total_channels', 0)} | "
-                      f"Media: {stats.get('media_files', 0)}")
-        
+            click.echo(
+                f"     Messages: {stats.get('total_messages', 0):,} | "
+                f"Channels: {stats.get('total_channels', 0)} | "
+                f"Media: {stats.get('media_files', 0)}"
+            )
+
         click.echo("-" * 60)
-    
+
     # Get user choice
     while True:
         try:
             choice = click.prompt(
                 f"\nSelect a backup file to restore (1-{len(valid_backups)}, or 0 to cancel)",
-                type=int
+                type=int,
             )
-            
+
             if choice == 0:
                 return None
             elif 1 <= choice <= len(valid_backups):
                 selected_backup = valid_backups[choice - 1]
                 click.echo(f"\n✅ Selected backup: {selected_backup['server_name']}")
                 click.echo(f"   File: {selected_backup['path']}")
-                return selected_backup['path']
+                return selected_backup["path"]
             else:
-                click.echo(f"❌ Invalid choice. Please enter 1-{len(valid_backups)} or 0 to cancel.")
-        
+                click.echo(
+                    f"❌ Invalid choice. Please enter 1-{len(valid_backups)} or 0 to cancel."
+                )
+
         except (ValueError, click.Abort):
             click.echo("\n❌ Operation cancelled.")
             return None
@@ -346,33 +354,72 @@ def backup(ctx, server_id, interactive, output, incremental, channels):
 )
 @click.option("--dry-run", "-d", is_flag=True, help="Preview changes without applying")
 @click.option("--skip-media", is_flag=True, help="Skip media upload during recreation")
-@click.option("--no-limits", is_flag=True, help="Bypass all Discord limits (restore all messages, ignore emoji/sticker limits)")
-@click.option("--max-messages", type=int, help="Maximum messages to restore per channel (0 = unlimited)")
-@click.option("--ignore-emoji-limit", is_flag=True, help="Ignore Discord emoji limits and continue creating")
-@click.option("--ignore-sticker-limit", is_flag=True, help="Ignore Discord sticker limits and continue creating")
-@click.option("--fast-mode", is_flag=True, help="Reduce rate limiting delays (may hit Discord rate limits)")
+@click.option(
+    "--no-limits",
+    is_flag=True,
+    help="Bypass all Discord limits (restore all messages, ignore emoji/sticker limits)",
+)
+@click.option(
+    "--max-messages",
+    type=int,
+    help="Maximum messages to restore per channel (0 = unlimited)",
+)
+@click.option(
+    "--ignore-emoji-limit",
+    is_flag=True,
+    help="Ignore Discord emoji limits and continue creating",
+)
+@click.option(
+    "--ignore-sticker-limit",
+    is_flag=True,
+    help="Ignore Discord sticker limits and continue creating",
+)
+@click.option(
+    "--fast-mode",
+    is_flag=True,
+    help="Reduce rate limiting delays (may hit Discord rate limits)",
+)
 @click.pass_context
-def recreate(ctx, backup_path, server_id, interactive, dry_run, skip_media, no_limits, max_messages, ignore_emoji_limit, ignore_sticker_limit, fast_mode):
+def recreate(
+    ctx,
+    backup_path,
+    server_id,
+    interactive,
+    dry_run,
+    skip_media,
+    no_limits,
+    max_messages,
+    ignore_emoji_limit,
+    ignore_sticker_limit,
+    fast_mode,
+):
     """Recreate a Discord server from backup"""
     config = ctx.obj["config"]
 
     # Validate input combinations
     if interactive:
         if backup_path or server_id:
-            click.echo("Error: Cannot use --backup-path or --server-id with --interactive", err=True)
+            click.echo(
+                "Error: Cannot use --backup-path or --server-id with --interactive",
+                err=True,
+            )
             return
     else:
         if not backup_path:
-            click.echo("Error: Must specify --backup-path or use --interactive mode", err=True)
+            click.echo(
+                "Error: Must specify --backup-path or use --interactive mode", err=True
+            )
             return
         if not server_id:
-            click.echo("Error: Must specify --server-id or use --interactive mode", err=True)
+            click.echo(
+                "Error: Must specify --server-id or use --interactive mode", err=True
+            )
             return
 
     async def run_recreation():
         # Apply bypass options to config
         modified_config = config.copy()
-        
+
         if no_limits:
             # Enable all bypass options when --no-limits is used
             modified_config.settings["restore_max_messages"] = 0  # 0 = unlimited
@@ -388,15 +435,15 @@ def recreate(ctx, backup_path, server_id, interactive, dry_run, skip_media, no_l
                     click.echo("📝 Unlimited message restoration enabled")
                 else:
                     click.echo(f"📝 Message limit set to {max_messages} per channel")
-            
+
             if ignore_emoji_limit:
                 modified_config.settings["ignore_emoji_limit"] = True
                 click.echo("😀 Emoji limit bypass enabled")
-            
+
             if ignore_sticker_limit:
                 modified_config.settings["ignore_sticker_limit"] = True
                 click.echo("🎯 Sticker limit bypass enabled")
-            
+
             if fast_mode:
                 modified_config.settings["rate_limit_delay"] = 0.1
                 click.echo("⚡ Fast mode enabled - reduced rate limiting")
@@ -418,56 +465,65 @@ def recreate(ctx, backup_path, server_id, interactive, dry_run, skip_media, no_l
                 if not backup_path_chosen:
                     click.echo("No backup file selected. Exiting.")
                     return
-                    
+
                 # Ask about bypass options in interactive mode
-                if not no_limits and not max_messages and not ignore_emoji_limit and not ignore_sticker_limit and not fast_mode:
+                if (
+                    not no_limits
+                    and not max_messages
+                    and not ignore_emoji_limit
+                    and not ignore_sticker_limit
+                    and not fast_mode
+                ):
                     click.echo("\n🎚️  Recreation Options:")
                     click.echo("=" * 50)
-                    
+
                     use_no_limits = click.confirm(
                         "🚀 Enable NO LIMITS mode? (Restore ALL messages, bypass Discord limits, faster speed)",
-                        default=False
+                        default=False,
                     )
-                    
+
                     if use_no_limits:
                         # Apply no-limits settings dynamically
-                        modified_config.settings["restore_max_messages"] = 0  # Unlimited
+                        modified_config.settings["restore_max_messages"] = (
+                            0  # Unlimited
+                        )
                         modified_config.settings["ignore_emoji_limit"] = True
                         modified_config.settings["ignore_sticker_limit"] = True
                         modified_config.settings["rate_limit_delay"] = 0.1  # Fast mode
-                        click.echo("🚀 No limits mode enabled - bypassing all Discord limits")
+                        click.echo(
+                            "🚀 No limits mode enabled - bypassing all Discord limits"
+                        )
                     else:
                         # Ask for individual options
                         restore_all_messages = click.confirm(
                             "📝 Restore ALL messages? (Default: only last 50 per channel)",
-                            default=False
+                            default=False,
                         )
                         if restore_all_messages:
                             modified_config.settings["restore_max_messages"] = 0
                             click.echo("📝 Unlimited message restoration enabled")
-                        
+
                         ignore_limits = click.confirm(
-                            "🚫 Ignore Discord emoji/sticker limits?",
-                            default=False
+                            "🚫 Ignore Discord emoji/sticker limits?", default=False
                         )
                         if ignore_limits:
                             modified_config.settings["ignore_emoji_limit"] = True
                             modified_config.settings["ignore_sticker_limit"] = True
                             click.echo("🚫 Emoji and sticker limit bypass enabled")
-                        
+
                         use_fast_mode = click.confirm(
                             "⚡ Use fast mode? (Faster but may hit rate limits)",
-                            default=False
+                            default=False,
                         )
                         if use_fast_mode:
                             modified_config.settings["rate_limit_delay"] = 0.1
                             click.echo("⚡ Fast mode enabled - reduced rate limiting")
-                
+
                 # Recreate the client and recreator with updated config
                 await client.close()
                 client = DiscordYoinkClient(modified_config)
                 recreator = ServerRecreator(modified_config)
-                
+
                 # Restart the client task
                 if start_task:
                     start_task.cancel()
@@ -484,7 +540,9 @@ def recreate(ctx, backup_path, server_id, interactive, dry_run, skip_media, no_l
                 click.echo(f"❌ Backup file not found: {backup_path_chosen}", err=True)
                 return
             except json.JSONDecodeError:
-                click.echo(f"❌ Invalid backup file format: {backup_path_chosen}", err=True)
+                click.echo(
+                    f"❌ Invalid backup file format: {backup_path_chosen}", err=True
+                )
                 return
 
             # Show backup info
@@ -493,7 +551,7 @@ def recreate(ctx, backup_path, server_id, interactive, dry_run, skip_media, no_l
             )
             backup_timestamp = backup_data.get("timestamp", "Unknown")
             stats = backup_data.get("stats", {})
-            
+
             click.echo(f"\n📁 Backup Info:")
             click.echo(f"   File: {backup_path_chosen}")
             click.echo(f"   Original Server: {original_server_name}")
