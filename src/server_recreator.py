@@ -30,6 +30,11 @@ class ServerRecreator:
             "errors": [],
         }
 
+    def _get_rate_limit_delay(self, multiplier: float = 1.0) -> float:
+        """Get the rate limit delay from config with optional multiplier"""
+        base_delay = self.config.get("rate_limit_delay", 1.0)
+        return base_delay * multiplier
+
     async def recreate_server(
         self,
         backup_data: Dict[str, Any],
@@ -338,10 +343,13 @@ class ServerRecreator:
                 if existing_emoji:
                     continue
 
-                # Check emoji limits
-                if len(guild.emojis) >= guild.emoji_limit:
+                # Check emoji limits (unless bypassed)
+                ignore_emoji_limit = self.config.get("ignore_emoji_limit", False)
+                if not ignore_emoji_limit and len(guild.emojis) >= guild.emoji_limit:
                     logger.warning("Emoji limit reached, skipping remaining emojis")
                     break
+                elif ignore_emoji_limit and len(guild.emojis) >= guild.emoji_limit:
+                    logger.info(f"Emoji limit bypass: continuing despite {len(guild.emojis)}/{guild.emoji_limit} emojis")
 
                 # Load emoji file
                 emoji_path = emoji_data.get("local_path")
@@ -360,7 +368,7 @@ class ServerRecreator:
                 )
 
                 logger.debug(f"Created emoji: {emoji_data['name']}")
-                await asyncio.sleep(1)  # Rate limiting
+                await asyncio.sleep(self._get_rate_limit_delay())  # Rate limiting
 
             except discord.Forbidden:
                 logger.error(f"No permission to create emoji: {emoji_data['name']}")
@@ -386,10 +394,13 @@ class ServerRecreator:
                 if existing_sticker:
                     continue
 
-                # Check sticker limits
-                if len(guild.stickers) >= guild.sticker_limit:
+                # Check sticker limits (unless bypassed)
+                ignore_sticker_limit = self.config.get("ignore_sticker_limit", False)
+                if not ignore_sticker_limit and len(guild.stickers) >= guild.sticker_limit:
                     logger.warning("Sticker limit reached, skipping remaining stickers")
                     break
+                elif ignore_sticker_limit and len(guild.stickers) >= guild.sticker_limit:
+                    logger.info(f"Sticker limit bypass: continuing despite {len(guild.stickers)}/{guild.sticker_limit} stickers")
 
                 # Load sticker file
                 sticker_path = sticker_data.get("local_path")
@@ -410,7 +421,7 @@ class ServerRecreator:
                 )
 
                 logger.debug(f"Created sticker: {sticker_data['name']}")
-                await asyncio.sleep(1)  # Rate limiting
+                await asyncio.sleep(self._get_rate_limit_delay())  # Rate limiting
 
             except discord.Forbidden:
                 logger.error(f"No permission to create sticker: {sticker_data['name']}")
@@ -432,6 +443,12 @@ class ServerRecreator:
         max_messages = config.get(
             "restore_max_messages", 50
         )  # Default to 50 messages per channel
+        
+        # Handle unlimited messages (0 = unlimited)
+        unlimited_messages = max_messages == 0
+        if unlimited_messages:
+            logger.info("📝 Unlimited message restoration mode enabled")
+        
         restore_media = config.get("restore_media", True)  # Default to restore media
 
         # Note: Message restoration limitations:
@@ -462,7 +479,14 @@ class ServerRecreator:
                 logger.debug(f"No messages found for channel {channel.name}")
                 continue
 
-            logger.info(f"Restoring up to {max_messages} messages in #{channel.name}")
+            if unlimited_messages:
+                logger.info(f"Restoring ALL {len(messages)} messages in #{channel.name}")
+                messages_to_restore = messages
+            else:
+                logger.info(f"Restoring up to {max_messages} messages in #{channel.name}")
+                messages_to_restore = (
+                    messages[-max_messages:] if len(messages) > max_messages else messages
+                )
 
             # Create a webhook for this channel to send messages with original usernames/avatars
             webhook = None
@@ -480,11 +504,6 @@ class ServerRecreator:
                     f"Could not create webhook for #{channel.name}: {e}. Using bot messages instead."
                 )
 
-            # Restore messages (most recent first, but we'll reverse to maintain chronological order)
-            messages_to_restore = (
-                messages[-max_messages:] if len(messages) > max_messages else messages
-            )
-
             for i, message in enumerate(messages_to_restore):
                 try:
                     # Cast channel to proper type for message restoration
@@ -496,9 +515,9 @@ class ServerRecreator:
 
                     # Rate limiting - be more aggressive to avoid hitting limits
                     if i % 5 == 0:  # Every 5 messages, longer pause
-                        await asyncio.sleep(3)
+                        await asyncio.sleep(self._get_rate_limit_delay(3.0))
                     else:
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(self._get_rate_limit_delay())
 
                 except Exception as e:
                     logger.error(f"Failed to restore message in #{channel.name}: {e}")
@@ -513,7 +532,7 @@ class ServerRecreator:
                     logger.warning(f"Could not delete webhook: {e}")
 
             logger.info(f"Completed message restoration for #{channel.name}")
-            await asyncio.sleep(2)  # Pause between channels
+            await asyncio.sleep(self._get_rate_limit_delay(2.0))  # Pause between channels
 
     async def _restore_single_message(
         self,

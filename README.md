@@ -23,6 +23,8 @@
 - **Server Structure**: Backup channels, categories, roles, and permissions
 - **User Data**: Preserve user information and member roles
 - **Server Recreation**: Recreate the entire server structure from backup
+- **🚀 Unlimited Restore**: Bypass Discord limits - restore ALL messages, ignore emoji/sticker limits
+- **Interactive Mode**: User-friendly server and backup selection with visual menus
 - **Incremental Backups**: Update existing backups with new content
 - **Export Formats**: JSON, HTML, and CSV export options
 
@@ -115,9 +117,31 @@ python discord_yoink.py export --backup-path ./backups/your_backup.json --format
 python discord_yoink.py backup --server-id 123456789012345678 --channels 111111111111111111 222222222222222222
 ```
 
-#### Recreate Server (Experimental)
+#### Recreate Server
 ```bash
+# 🎯 RECOMMENDED: Complete interactive experience
+python discord_yoink.py recreate --interactive
+# ↳ Choose backup file → Choose unlimited options → Choose target server
+
+# Quick unlimited restore
+python discord_yoink.py recreate --interactive --no-limits
+
+# Traditional method with specific paths
 python discord_yoink.py recreate --backup-path ./backups/backup.json --server-id 987654321098765432
+```
+
+#### Interactive Features
+```bash
+# Interactive backup selection
+python discord_yoink.py backup --interactive
+
+# Interactive recreation with guided options
+python discord_yoink.py recreate --interactive
+# • Choose from available backup files with stats
+# • Enable unlimited message restoration  
+# • Bypass Discord emoji/sticker limits
+# • Select fast mode for quicker recreation
+# • Pick target server from your servers
 ```
 
 #### Analyze Backup
@@ -152,11 +176,17 @@ Backups are saved to `./backups/SERVERNAME_TIMESTAMP/`
 
 ### Basic Commands
 ```bash
-# Backup a server
+# Interactive backup - choose server from list
+python discord_yoink.py backup --interactive
+
+# Interactive recreation with unlimited restore
+python discord_yoink.py recreate --interactive --no-limits
+
+# Traditional backup with server ID
 python discord_yoink.py backup --server-id YOUR_SERVER_ID --output ./backups/
 
-# Recreate a server (with message restoration)
-python discord_yoink.py recreate --backup-path ./backups/server_backup.json --server-id NEW_SERVER_ID
+# Recreate server with ALL messages (bypassing 50-message limit)
+python discord_yoink.py recreate --backup-path ./backups/server_backup.json --server-id NEW_SERVER_ID --max-messages 0
 
 # Recreate structure only (skip messages)
 python discord_yoink.py recreate --backup-path ./backups/server_backup.json --server-id NEW_SERVER_ID --skip-media
@@ -199,7 +229,8 @@ Copy `config.example.json` to `config.json` and customize settings:
 }
 ```
 
-📋 **Full configuration guide:** [Configuration Documentation](docs/configuration.md)
+📋 **Full configuration guide:** [Configuration Documentation](docs/configuration.md)  
+🚀 **Unlimited restore guide:** [Unlimited Restore Features](docs/unlimited_restore.md)
 
 ## 🏗️ Server Recreation
 
